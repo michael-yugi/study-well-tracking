@@ -1,5 +1,7 @@
 # Studywell
 
+Repository: `study-well-tracking`
+
 A small, browser based study tracker for following a personal timetable and remembering what each session covered.
 
 ## Open it
