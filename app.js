@@ -1,5 +1,9 @@
 (() => {
   const STORAGE_KEY = "studywell-tracker-v1";
+  const LOCAL_MIGRATION_KEY = "studywell-local-imported-v1";
+  const supabaseClient = window.STUDYWELL_SUPABASE && window.supabase?.createClient
+    ? window.supabase.createClient(window.STUDYWELL_SUPABASE.url, window.STUDYWELL_SUPABASE.publishableKey)
+    : null;
   const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const $ = (id) => document.getElementById(id);
@@ -32,6 +36,11 @@
     focus: "Review weekly topics, practise questions, revisit difficult topics",
   });
   const defaultState = { name: "Student", schedule: LEWI_TIMETABLE, logs: [], activeTimer: null, timetableImported: true };
+  let authUser = null;
+  let accountProfile = null;
+  let linkedStudents = [];
+  let selectedStudentId = null;
+  let authMode = "signin";
   let state = loadState();
   let timerInterval = null;
   let toastTimeout = null;
@@ -51,7 +60,11 @@
     } catch (_) { /* Start clean if stored data is unavailable. */ }
     return { ...defaultState };
   }
-  function saveState() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  function saveState() {
+    if (authUser && accountProfile?.account_type === "parent") return;
+    const key = authUser && accountProfile?.account_type === "student" ? `${STORAGE_KEY}:user:${authUser.id}` : STORAGE_KEY;
+    localStorage.setItem(key, JSON.stringify(state));
+  }
   function formatDate(date, options = { weekday: "long", month: "long", day: "numeric" }) { return new Intl.DateTimeFormat(undefined, options).format(date); }
   function formatTime(value) {
     if (!value) return "";
@@ -128,6 +141,7 @@
       let action, statusClass = "";
       if (active) { statusClass = "status-live"; action = `<button class="session-action timer-action" data-action="finish" data-id="${escapeHTML(session.id)}">${formatElapsed()}</button>`; }
       else if (log) { statusClass = `status-${log.status === "completed" ? "done" : log.status}`; action = `<button class="session-action done-action" data-action="view-log" data-id="${escapeHTML(log.id)}">${log.status === "missed" ? "Missed" : `${durationCompact(log.minutes)} · ${log.status === "partial" ? "Partial" : "Logged"}`}</button>`; }
+      else if (isParentView()) { action = `<button class="session-action" disabled>Not logged</button>`; }
       else if (state.activeTimer) { action = `<button class="session-action" disabled title="Finish the active timer first">Waiting</button>`; }
       else { action = `<button class="session-action ${isDue(session, iso) ? "missed-action" : ""}" data-action="start-or-log" data-id="${escapeHTML(session.id)}">${isDue(session, iso) ? "Log session" : "Start timer"}</button>`; }
       const focus = log ? log.topic : session.focus || "Planned study time";
@@ -141,11 +155,11 @@
   }
   function renderTimetable() {
     const container = $("scheduleList");
-    if (!state.schedule.length) { container.innerHTML = `<div class="empty-timetable"><span class="empty-plan-icon">▦</span><h3>Start with the plan you have</h3><p>Add a few study blocks from your real timetable. When the time comes, start a focus timer and record what you covered.</p><button class="button button-dark" id="emptyAddBtn"><span class="button-plus">+</span> Add your first session</button></div>`; return; }
+    if (!state.schedule.length) { container.innerHTML = `<div class="empty-timetable"><span class="empty-plan-icon">▦</span><h3>${isParentView() ? "No timetable available yet" : "Start with the plan you have"}</h3><p>${isParentView() ? "The student has not added a timetable yet." : "Add a few study blocks from your real timetable. When the time comes, start a focus timer and record what you covered."}</p>${isParentView() ? "" : `<button class="button button-dark" id="emptyAddBtn"><span class="button-plus">+</span> Add your first session</button>`}</div>`; return; }
     container.innerHTML = Array.from({ length: 7 }, (_, index) => (index + 1) % 7).map((day) => {
       const sessions = state.schedule.filter((item) => Number(item.day) === day).sort((a, b) => a.start.localeCompare(b.start));
-      const entries = sessions.map((session) => `<div class="schedule-entry"><span class="schedule-entry-time">${formatTime(session.start)}<br>${formatTime(session.end)}</span><span class="schedule-entry-line"></span><span class="schedule-entry-copy"><strong>${escapeHTML(session.subject)}</strong><span>${escapeHTML(session.focus || "No focus topic added")} · ${durationLabel(minutesFromTime(session.end) - minutesFromTime(session.start))}</span></span><span class="schedule-entry-actions"><button class="small-action edit-session" data-id="${escapeHTML(session.id)}" aria-label="Edit ${escapeHTML(session.subject)}" title="Edit">✎</button><button class="small-action delete-session" data-id="${escapeHTML(session.id)}" aria-label="Delete ${escapeHTML(session.subject)}" title="Delete">×</button></span></div>`).join("");
-      return `<section class="day-card"><div class="day-card-header"><span class="day-title">${DAYS[day]}<span class="day-count">${sessions.length ? `${sessions.length} ${sessions.length === 1 ? "session" : "sessions"}` : "—"}</span></span><button class="small-action add-day-session" data-day="${day}" aria-label="Add session on ${DAYS[day]}" title="Add a session">＋</button></div><div class="day-card-content">${entries || `<div class="empty-day">No study blocks planned.</div>`}</div></section>`;
+      const entries = sessions.map((session) => `<div class="schedule-entry"><span class="schedule-entry-time">${formatTime(session.start)}<br>${formatTime(session.end)}</span><span class="schedule-entry-line"></span><span class="schedule-entry-copy"><strong>${escapeHTML(session.subject)}</strong><span>${escapeHTML(session.focus || "No focus topic added")} · ${durationLabel(minutesFromTime(session.end) - minutesFromTime(session.start))}</span></span>${isParentView() ? "" : `<span class="schedule-entry-actions"><button class="small-action edit-session" data-id="${escapeHTML(session.id)}" aria-label="Edit ${escapeHTML(session.subject)}" title="Edit">✎</button><button class="small-action delete-session" data-id="${escapeHTML(session.id)}" aria-label="Delete ${escapeHTML(session.subject)}" title="Delete">×</button></span>`}</div>`).join("");
+      return `<section class="day-card"><div class="day-card-header"><span class="day-title">${DAYS[day]}<span class="day-count">${sessions.length ? `${sessions.length} ${sessions.length === 1 ? "session" : "sessions"}` : "—"}</span></span>${isParentView() ? "" : `<button class="small-action add-day-session" data-day="${day}" aria-label="Add session on ${DAYS[day]}" title="Add a session">＋</button>`}</div><div class="day-card-content">${entries || `<div class="empty-day">No study blocks planned.</div>`}</div></section>`;
     }).join("");
   }
   function renderHistory() {
@@ -172,22 +186,27 @@
     $("sessionDialog").showModal(); $("subjectInput").focus();
   }
   function openLogDialog({ session = null, log = null, minutes = null, timer = false } = {}) {
+    const readOnly = isParentView();
     $("logForm").reset(); $("logError").textContent = "";
+    ["logSubject", "topicInput", "minutesInput", "logDateInput", "notesInput", "statusInput"].forEach((id) => { $(id).disabled = false; });
+    $("saveLogBtn").hidden = false;
     $("logSessionId").value = log?.sessionId || session?.id || "";
     $("logEyebrow").textContent = timer ? "NICE WORK — MAKE A NOTE OF IT" : log ? "YOUR STUDY NOTES" : "MAKE A NOTE OF IT";
-    $("logTitle").textContent = log ? "Update study log" : "Log study time";
+    $("logTitle").textContent = readOnly ? "Study record" : log ? "Update study log" : "Log study time";
     $("logSubject").value = log?.subject || session?.subject || "";
     $("topicInput").value = log?.topic || "";
     $("minutesInput").value = log ? log.minutes : minutes ?? (session ? Math.max(1, minutesFromTime(session.end) - minutesFromTime(session.start)) : "");
     $("logDateInput").value = log?.date || todayISO(); $("logDateInput").max = todayISO(); $("notesInput").value = log?.notes || ""; $("statusInput").value = log?.status || "completed";
     $("plannedForLabel").textContent = session ? `Planned ${formatTime(session.start)}–${formatTime(session.end)}` : log?.plannedStart ? `Planned ${formatTime(log.plannedStart)}–${formatTime(log.plannedEnd)}` : "Independent study";
     $("timerBanner").hidden = !timer; $("saveLogBtn").textContent = log ? "Save changes" : "Save study log"; updateLogStatusFields();
-    $("logDialog").showModal(); if (timer) updateTimerText(); $("topicInput").focus();
+    ["logSubject", "topicInput", "minutesInput", "logDateInput", "notesInput", "statusInput"].forEach((id) => { $(id).disabled = readOnly; });
+    $("saveLogBtn").hidden = readOnly;
+    $("logDialog").showModal(); if (timer) updateTimerText(); if (!readOnly) $("topicInput").focus();
   }
   function formatElapsed() { if (!state.activeTimer) return "Start timer"; const sec = Math.max(0, Math.floor((Date.now() - state.activeTimer.startedAt) / 1000)); return `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`; }
   function updateTimerText() { $("timerText").textContent = formatElapsed(); }
   function startTimer(session) {
-    if (state.activeTimer) return;
+    if (isParentView() || state.activeTimer) return;
     state.activeTimer = { sessionId: session.id, date: todayISO(), startedAt: Date.now() }; saveState();
     timerInterval = setInterval(() => { updateTimerText(); renderToday(); }, 1000); renderOverview(); showToast(`Focus timer started for ${session.subject}`);
   }
@@ -197,6 +216,7 @@
   }
   function finishTimerState() { state.activeTimer = null; clearInterval(timerInterval); timerInterval = null; }
   function saveLog() {
+    if (isParentView()) { $("logError").textContent = "Parent accounts can view logs but cannot edit them."; return false; }
     const id = $("logSessionId").value; const session = state.schedule.find((item) => item.id === id);
     const status = $("statusInput").value; const topic = $("topicInput").value.trim(); const minutes = status === "missed" ? 0 : Number($("minutesInput").value);
     if (!$("logSubject").value.trim() || (status !== "missed" && !topic) || !$("logDateInput").value || !Number.isInteger(minutes) || minutes < 0 || minutes > 1440) { $("logError").textContent = status === "missed" ? "Add a subject and valid study date." : "Add a subject, topic, valid date, and minutes studied."; return false; }
@@ -205,13 +225,15 @@
     const prior = priorIndex >= 0 ? state.logs[priorIndex] : null;
     const entry = { id: prior?.id || uid(), sessionId: id || null, date, subject: $("logSubject").value.trim(), topic: status === "missed" ? topic || "Session missed" : topic, minutes, notes: $("notesInput").value.trim(), status, plannedStart: session?.start || prior?.plannedStart || null, plannedEnd: session?.end || prior?.plannedEnd || null, createdAt: prior?.createdAt || new Date().toISOString() };
     if (priorIndex >= 0) state.logs[priorIndex] = entry; else state.logs.push(entry);
-    saveState(); $("logDialog").close(); renderOverview(); renderHistory(); showToast(prior ? "Study log updated" : "Study session saved"); return true;
+    saveState(); $("logDialog").close(); renderOverview(); renderHistory();
+    if (isStudentAccount()) void syncLog(entry);
+    showToast(prior ? "Study log updated" : "Study session saved"); return true;
   }
   function markMissed(session) {
     const existing = getOccurrenceLog(session.id, todayISO());
     if (existing) return;
     state.logs.push({ id: uid(), sessionId: session.id, date: todayISO(), subject: session.subject, topic: "Session missed", minutes: 0, notes: "", status: "missed", plannedStart: session.start, plannedEnd: session.end, createdAt: new Date().toISOString() });
-    saveState(); renderOverview(); renderHistory(); showToast("Session marked as missed");
+    saveState(); renderOverview(); renderHistory(); if (isStudentAccount()) void syncLog(state.logs[state.logs.length - 1]); showToast("Session marked as missed");
   }
   function updateLogStatusFields() {
     const missed = $("statusInput").value === "missed";
@@ -222,14 +244,243 @@
     else if ($("minutesInput").value === "0") $("minutesInput").value = "";
   }
 
+  function isStudentAccount() { return Boolean(authUser && accountProfile?.account_type === "student"); }
+  function isParentView() { return Boolean(authUser && accountProfile?.account_type === "parent"); }
+  function setCloudStatus(message) {
+    const button = $("syncAccountBtn");
+    if (button) { button.textContent = authUser ? (isParentView() ? "Parent account" : "Synced account") : "Sign in to sync"; button.title = message; }
+    const messageEl = $("cloudMessage"); if (messageEl) messageEl.textContent = message;
+  }
+  function renderCloudControls() {
+    const parent = isParentView();
+    $("quickLogBtn").hidden = parent; $("historyLogBtn").hidden = parent; $("addSessionBtn").hidden = parent;
+    $("editNameBtn").hidden = parent;
+    $("studentPicker").hidden = !parent || linkedStudents.length === 0;
+    if (parent && linkedStudents.length) {
+      const picker = $("studentPicker");
+      picker.replaceChildren(...linkedStudents.map((student) => { const option = document.createElement("option"); option.value = student.id; option.textContent = student.display_name; return option; }));
+      picker.value = selectedStudentId || linkedStudents[0].id;
+    }
+    setCloudStatus(authUser ? (parent ? "Parent view: synced study logs are read-only." : "Student data is syncing to your account.") : "Study data stays on this device until you sign in.");
+  }
+  function setAccountMode(mode) {
+    authMode = mode;
+    document.querySelectorAll(".auth-mode").forEach((button) => button.classList.toggle("active", button.dataset.mode === mode));
+    $("signupFields").hidden = mode !== "signup";
+    $("accountDialogTitle").textContent = mode === "signup" ? "Create a Studywell account" : "Sync your study data";
+    $("accountSubmit").textContent = mode === "signup" ? "Create account" : "Sign in";
+    $("accountError").textContent = "";
+  }
+  function openAccountDialog() {
+    $("accountError").textContent = ""; $("linkError").textContent = "";
+    $("authPanel").hidden = Boolean(authUser); $("linkPanel").hidden = !authUser;
+    if (authUser) {
+      $("accountDialogTitle").textContent = "Cloud sync";
+      $("signedInSummary").textContent = `${accountProfile?.display_name || authUser.email} · ${isParentView() ? "Parent / teacher" : "Student"}`;
+      $("parentTools").hidden = !isParentView(); $("studentTools").hidden = !isStudentAccount();
+      $("linkedStudentsList").replaceChildren(...linkedStudents.map((student) => { const item = document.createElement("div"); item.className = "linked-student"; item.textContent = `${student.display_name} · linked student`; return item; }));
+    } else setAccountMode("signin");
+    $("accountDialog").showModal();
+  }
+  function readCachedUserState(userId) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(`${STORAGE_KEY}:user:${userId}`));
+      if (saved && Array.isArray(saved.schedule) && Array.isArray(saved.logs)) return { ...defaultState, ...saved };
+    } catch (_) { /* Ignore a damaged per-user cache and recover from the cloud. */ }
+    return null;
+  }
+  function toRemoteLog(log, studentId) {
+    return {
+      student_id: studentId, id: log.id, session_id: log.sessionId || null, study_date: log.date,
+      subject: log.subject, topic: log.topic, minutes: Number(log.minutes || 0), notes: log.notes || "",
+      status: log.status, planned_start: log.plannedStart || null, planned_end: log.plannedEnd || null,
+      created_at: log.createdAt || new Date().toISOString(),
+    };
+  }
+  function fromRemoteLog(row) {
+    return {
+      id: row.id, sessionId: row.session_id, date: row.study_date, subject: row.subject, topic: row.topic,
+      minutes: row.minutes, notes: row.notes || "", status: row.status, plannedStart: row.planned_start,
+      plannedEnd: row.planned_end, createdAt: row.created_at,
+    };
+  }
+  async function uploadStudentLogs(logs) {
+    if (!logs.length) return true;
+    const { error } = await supabaseClient.from("study_logs").upsert(logs.map((log) => toRemoteLog(log, authUser.id)), { onConflict: "student_id,id" });
+    if (error) throw error;
+    return true;
+  }
+  async function fetchStudentLogs(studentId) {
+    const { data, error } = await supabaseClient.from("study_logs").select("*").eq("student_id", studentId).order("study_date", { ascending: false });
+    if (error) throw error;
+    return (data || []).map(fromRemoteLog);
+  }
+  async function syncProfile() {
+    if (!isStudentAccount()) return;
+    const { error } = await supabaseClient.from("study_profiles").update({ display_name: state.name || "Student", timetable: state.schedule }).eq("id", authUser.id);
+    if (error) { setCloudStatus("Could not sync your timetable. Your local copy is saved."); return false; }
+    accountProfile.display_name = state.name || accountProfile.display_name;
+    accountProfile.timetable = state.schedule;
+    setCloudStatus("Timetable synced to your account.");
+    return true;
+  }
+  async function syncLog(log) {
+    if (!isStudentAccount()) return;
+    setCloudStatus("Syncing study log…");
+    try {
+      await uploadStudentLogs([log]);
+      setCloudStatus("Study log synced to your account.");
+    } catch (error) {
+      setCloudStatus("Saved on this device; cloud sync will retry when you reconnect.");
+    }
+  }
+  async function loadStudentAccountState() {
+    let saved = readCachedUserState(authUser.id);
+    let importingFirstLocalUse = false;
+    if (!saved && !localStorage.getItem(LOCAL_MIGRATION_KEY)) {
+      saved = loadState();
+      importingFirstLocalUse = true;
+    }
+    state = saved || { ...defaultState, name: accountProfile.display_name || "Student", schedule: Array.isArray(accountProfile.timetable) && accountProfile.timetable.length ? accountProfile.timetable : LEWI_TIMETABLE, logs: [], activeTimer: null };
+    state.name = accountProfile.display_name || state.name || "Student";
+    if (Array.isArray(accountProfile.timetable) && accountProfile.timetable.length) state.schedule = accountProfile.timetable;
+    setCloudStatus("Syncing this student's timetable and study logs…");
+    try {
+      const profileSynced = await syncProfile();
+      await uploadStudentLogs(state.logs);
+      if (importingFirstLocalUse) localStorage.setItem(LOCAL_MIGRATION_KEY, authUser.id);
+      state.logs = await fetchStudentLogs(authUser.id);
+      saveState();
+      setCloudStatus(profileSynced === false ? "Logs synced. Check timetable sync." : "Study logs and timetable are synced.");
+    } catch (error) {
+      saveState();
+      setCloudStatus("Could not reach the cloud. Your local study data is saved and will retry next sign-in.");
+    }
+  }
+  async function loadParentStudents() {
+    const { data: links, error: linksError } = await supabaseClient.from("study_access").select("student_id").eq("parent_id", authUser.id);
+    if (linksError) throw linksError;
+    const ids = (links || []).map((link) => link.student_id);
+    if (!ids.length) {
+      linkedStudents = []; selectedStudentId = null;
+      state = { ...defaultState, name: accountProfile.display_name || "Parent", schedule: [], logs: [], activeTimer: null };
+      return;
+    }
+    const { data: profiles, error: profileError } = await supabaseClient.from("study_profiles").select("id,display_name,timetable").in("id", ids);
+    if (profileError) throw profileError;
+    linkedStudents = profiles || [];
+    if (!linkedStudents.some((student) => student.id === selectedStudentId)) selectedStudentId = linkedStudents[0]?.id || null;
+    await loadSelectedStudent();
+  }
+  async function loadSelectedStudent() {
+    const student = linkedStudents.find((item) => item.id === selectedStudentId);
+    if (!student) return;
+    state = { ...defaultState, name: student.display_name || "Student", schedule: Array.isArray(student.timetable) ? student.timetable : [], logs: [], activeTimer: null };
+    try { state.logs = await fetchStudentLogs(student.id); setCloudStatus(`Viewing ${student.display_name}'s synced study logs.`); }
+    catch (error) { setCloudStatus("Could not load this student's cloud logs."); }
+    renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
+  }
+  async function handleAuthSession(session) {
+    if (!session) {
+      authUser = null; accountProfile = null; linkedStudents = []; selectedStudentId = null; state = loadState();
+      renderCloudControls(); renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
+      return;
+    }
+    authUser = session.user;
+    setCloudStatus("Loading your Studywell account…");
+    const { data: profile, error } = await supabaseClient.from("study_profiles").select("*").eq("id", authUser.id).maybeSingle();
+    if (error || !profile) { setCloudStatus("Account profile missing. Run the Studywell database setup SQL first."); return; }
+    accountProfile = profile;
+    try {
+      if (isParentView()) await loadParentStudents();
+      else { linkedStudents = []; selectedStudentId = null; await loadStudentAccountState(); }
+      renderCloudControls(); renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
+    } catch (error) {
+      setCloudStatus("Cloud setup is incomplete. Check the Studywell SQL setup and try again.");
+    }
+  }
+  async function initializeCloud() {
+    if (!supabaseClient) { setCloudStatus("Cloud connection is not configured."); return; }
+    supabaseClient.auth.onAuthStateChange((_event, session) => { window.setTimeout(() => void handleAuthSession(session), 0); });
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error) { setCloudStatus("Could not check your cloud session."); return; }
+    await handleAuthSession(data.session);
+  }
+  async function submitAccountForm() {
+    if (!supabaseClient) { $("accountError").textContent = "Cloud setup is not configured."; return; }
+    const email = $("accountEmail").value.trim(); const password = $("accountPassword").value;
+    if (!email || password.length < 8) { $("accountError").textContent = "Enter your email and a password with at least 8 characters."; return; }
+    $("accountSubmit").disabled = true; $("accountError").textContent = "";
+    try {
+      if (authMode === "signup") {
+        const displayName = $("accountName").value.trim();
+        if (!displayName) { $("accountError").textContent = "Add your name to create an account."; return; }
+        const { data, error } = await supabaseClient.auth.signUp({
+          email, password,
+          options: { data: { display_name: displayName, account_type: $("accountType").value }, emailRedirectTo: `${window.location.origin}${window.location.pathname}` },
+        });
+        if (error) throw error;
+        if (data.session) { await handleAuthSession(data.session); $("accountDialog").close(); showToast("Studywell account created"); }
+        else { $("cloudMessage").textContent = "Check your email to confirm the account, then return here to sign in."; $("accountError").textContent = "Confirmation email sent."; }
+      } else {
+        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        await handleAuthSession(data.session); $("accountDialog").close(); showToast("Signed in and syncing");
+      }
+    } catch (error) { $("accountError").textContent = error.message || "Could not sign in. Check the details and try again."; }
+    finally { $("accountSubmit").disabled = false; }
+  }
+  async function createInviteCode() {
+    $("linkError").textContent = ""; $("createInviteBtn").disabled = true;
+    try {
+      const { data, error } = await supabaseClient.rpc("create_study_invite");
+      if (error) throw error;
+      $("inviteCodeText").textContent = data; $("inviteCodeBox").hidden = false;
+    } catch (error) { $("linkError").textContent = error.message || "Could not create a link code. Check the database setup."; }
+    finally { $("createInviteBtn").disabled = false; }
+  }
+  async function redeemInviteCode() {
+    const code = $("parentCodeInput").value.trim().toUpperCase();
+    if (!code) { $("linkError").textContent = "Enter the code from your parent or teacher."; return; }
+    $("linkError").textContent = ""; $("redeemInviteBtn").disabled = true;
+    try {
+      const { error } = await supabaseClient.rpc("redeem_study_invite", { p_code: code });
+      if (error) throw error;
+      $("parentCodeInput").value = ""; $("linkError").textContent = "Linked. Your parent can now view your synced study logs.";
+      await handleAuthSession({ user: authUser });
+      showToast("Parent link created");
+    } catch (error) { $("linkError").textContent = error.message || "That code could not be used."; }
+    finally { $("redeemInviteBtn").disabled = false; }
+  }
+
   document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.view)));
   document.querySelectorAll("[data-go]").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.go)));
-  $("quickLogBtn").addEventListener("click", () => openLogDialog()); $("historyLogBtn").addEventListener("click", () => openLogDialog()); $("addSessionBtn").addEventListener("click", () => openSessionDialog());
+  $("quickLogBtn").addEventListener("click", () => openLogDialog()); $("historyLogBtn").addEventListener("click", () => openLogDialog()); $("addSessionBtn").addEventListener("click", () => { if (!isParentView()) openSessionDialog(); });
+  $("syncAccountBtn").addEventListener("click", openAccountDialog);
+  document.querySelectorAll(".auth-mode").forEach((button) => button.addEventListener("click", () => setAccountMode(button.dataset.mode)));
+  $("accountSubmit").addEventListener("click", () => void submitAccountForm());
+  $("createInviteBtn").addEventListener("click", () => void createInviteCode());
+  $("copyInviteBtn").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText($("inviteCodeText").textContent); showToast("Link code copied"); }
+    catch (_) { $("linkError").textContent = "Copy was unavailable. Select and copy the code above."; }
+  });
+  $("redeemInviteBtn").addEventListener("click", () => void redeemInviteCode());
+  $("signOutBtn").addEventListener("click", async () => {
+    const { error } = await supabaseClient.auth.signOut();
+    if (error) { $("linkError").textContent = error.message || "Could not sign out."; return; }
+    $("accountDialog").close(); showToast("Signed out");
+  });
+  $("studentPicker").addEventListener("change", async (event) => {
+    selectedStudentId = event.target.value;
+    await loadSelectedStudent(); renderCloudControls(); renderOverview();
+  });
+  $("accountDialog").addEventListener("click", (event) => { if (event.target === $("accountDialog") || event.target.closest("[data-close-account]")) $("accountDialog").close(); });
+  window.addEventListener("online", () => { if (isStudentAccount()) { void syncProfile(); void uploadStudentLogs(state.logs).catch(() => setCloudStatus("Offline changes are saved; cloud sync will retry.")); } });
   $("scheduleList").addEventListener("click", (event) => {
-    const add = event.target.closest(".add-day-session"); if (add) return openSessionDialog(null, Number(add.dataset.day));
-    if (event.target.closest("#emptyAddBtn")) return openSessionDialog();
-    const edit = event.target.closest(".edit-session"); if (edit) return openSessionDialog(state.schedule.find((item) => item.id === edit.dataset.id));
-    const del = event.target.closest(".delete-session"); if (del) { const session = state.schedule.find((item) => item.id === del.dataset.id); state.schedule = state.schedule.filter((item) => item.id !== del.dataset.id); saveState(); renderTimetable(); renderOverview(); showToast(`${session?.subject || "Session"} removed`); }
+    const add = event.target.closest(".add-day-session"); if (add && !isParentView()) return openSessionDialog(null, Number(add.dataset.day));
+    if (event.target.closest("#emptyAddBtn") && !isParentView()) return openSessionDialog();
+    const edit = event.target.closest(".edit-session"); if (edit && !isParentView()) return openSessionDialog(state.schedule.find((item) => item.id === edit.dataset.id));
+    const del = event.target.closest(".delete-session"); if (del && !isParentView()) { const session = state.schedule.find((item) => item.id === del.dataset.id); state.schedule = state.schedule.filter((item) => item.id !== del.dataset.id); saveState(); renderTimetable(); renderOverview(); if (isStudentAccount()) void syncProfile(); showToast(`${session?.subject || "Session"} removed`); }
   });
   $("todaySessions").addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]"); if (!button) return;
@@ -245,17 +496,19 @@
     event.preventDefault();
     const start = $("startInput").value, end = $("endInput").value;
     if (end <= start) { $("sessionError").textContent = "End time needs to be later than start time."; return; }
+    if (isParentView()) { $("sessionError").textContent = "Parent accounts cannot edit a student timetable."; return; }
     const id = $("sessionId").value; const session = { id: id || uid(), day: Number($("dayInput").value), start, end, subject: $("subjectInput").value.trim(), focus: $("focusInput").value.trim() };
     if (id) state.schedule = state.schedule.map((item) => item.id === id ? session : item); else state.schedule.push(session);
-    saveState(); $("sessionDialog").close(); renderTimetable(); renderOverview(); showToast(id ? "Timetable updated" : "Session added to timetable");
+    saveState(); $("sessionDialog").close(); renderTimetable(); renderOverview(); if (isStudentAccount()) void syncProfile(); showToast(id ? "Timetable updated" : "Session added to timetable");
   });
   $("logForm").addEventListener("submit", (event) => { if (event.submitter?.value === "cancel") return; event.preventDefault(); saveLog(); });
   $("statusInput").addEventListener("change", updateLogStatusFields);
   $("logSearch").addEventListener("input", renderHistory);
   $("editNameBtn").addEventListener("click", () => { $("nameInput").value = state.name === "Student" ? "" : state.name; $("nameDialog").showModal(); $("nameInput").focus(); });
-  $("nameForm").addEventListener("submit", (event) => { if (event.submitter?.value === "cancel") return; event.preventDefault(); state.name = $("nameInput").value.trim() || "Student"; saveState(); $("nameDialog").close(); renderOverview(); showToast("Profile name updated"); });
+  $("nameForm").addEventListener("submit", (event) => { if (event.submitter?.value === "cancel") return; event.preventDefault(); state.name = $("nameInput").value.trim() || "Student"; saveState(); if (isStudentAccount()) { accountProfile.display_name = state.name; void syncProfile(); } $("nameDialog").close(); renderOverview(); showToast("Profile name updated"); });
   ["sessionDialog", "logDialog", "nameDialog"].forEach((id) => $(id).addEventListener("click", (event) => { if (event.target === $(id)) $(id).close(); }));
   document.addEventListener("click", (event) => { const go = event.target.closest("[data-go]"); if (go && go.closest(".page-view")) navigate(go.dataset.go); });
   if (state.activeTimer) { timerInterval = setInterval(() => { updateTimerText(); renderToday(); }, 1000); }
   renderOverview();
+  void initializeCloud();
 })();
