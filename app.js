@@ -532,6 +532,7 @@
     await loadSelectedStudent(); renderCloudControls(); renderOverview();
   });
   $("accountDialog").addEventListener("click", (event) => { if (event.target === $("accountDialog") || event.target.closest("[data-close-account]")) $("accountDialog").close(); });
+  document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => $(button.dataset.closeDialog).close()));
   window.addEventListener("online", () => { if (isStudentAccount()) { void syncProfile(); void uploadStudentLogs(state.logs).catch(() => setCloudStatus("Offline changes are saved; cloud sync will retry.")); } });
   $("scheduleList").addEventListener("click", (event) => {
     const add = event.target.closest(".add-day-session"); if (add && !isParentView()) return openSessionDialog(null, Number(add.dataset.day));

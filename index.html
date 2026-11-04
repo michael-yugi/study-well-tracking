@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=3" />
+    <link rel="stylesheet" href="styles.css?v=4" />
   </head>
   <body>
     <div class="app-shell">
@@ -79,19 +79,19 @@
 
     <dialog class="modal" id="sessionDialog">
       <form method="dialog" id="sessionForm">
-        <div class="modal-top"><div><p class="eyebrow" id="modalEyebrow">ADD TO YOUR TIMETABLE</p><h2 id="modalTitle">Plan a study session</h2></div><button class="icon-button close-modal" aria-label="Close">×</button></div>
+        <div class="modal-top"><div><p class="eyebrow" id="modalEyebrow">ADD TO YOUR TIMETABLE</p><h2 id="modalTitle">Plan a study session</h2></div><button type="button" class="icon-button close-modal" data-close-dialog="sessionDialog" aria-label="Close">×</button></div>
         <input type="hidden" id="sessionId" />
         <label class="field-label" for="subjectInput">Subject</label><input class="field-input" id="subjectInput" required maxlength="48" placeholder="e.g. Biology" />
         <label class="field-label" for="focusInput">What will you focus on? <span>optional</span></label><input class="field-input" id="focusInput" maxlength="80" placeholder="e.g. Cell structure, chapter 3" />
         <div class="field-row"><div class="field-grow"><label class="field-label" for="dayInput">Day</label><select class="field-input" id="dayInput"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></div><div class="field-grow"><label class="field-label" for="startInput">Start</label><input class="field-input" id="startInput" type="time" value="16:00" required /></div><div class="field-grow"><label class="field-label" for="endInput">End</label><input class="field-input" id="endInput" type="time" value="17:00" required /></div></div>
         <p class="form-error" id="sessionError" role="alert"></p>
-        <div class="modal-actions"><button class="button button-quiet" value="cancel">Cancel</button><button class="button button-dark" id="saveSessionBtn" value="save">Save session</button></div>
+        <div class="modal-actions"><button class="button button-quiet" value="cancel" formnovalidate>Cancel</button><button class="button button-dark" id="saveSessionBtn" value="save">Save session</button></div>
       </form>
     </dialog>
 
     <dialog class="modal" id="logDialog">
       <form method="dialog" id="logForm">
-        <div class="modal-top"><div><p class="eyebrow" id="logEyebrow">MAKE A NOTE OF IT</p><h2 id="logTitle">Log study time</h2></div><button class="icon-button close-modal" aria-label="Close">×</button></div>
+        <div class="modal-top"><div><p class="eyebrow" id="logEyebrow">MAKE A NOTE OF IT</p><h2 id="logTitle">Log study time</h2></div><button type="button" class="icon-button close-modal" data-close-dialog="logDialog" aria-label="Close">×</button></div>
         <input type="hidden" id="logSessionId" />
         <div class="timer-banner" id="timerBanner" hidden><span class="timer-live"></span><span id="timerText">00:00</span><span class="timer-copy">Focus timer running</span></div>
         <label class="field-label" for="logSubject">Subject</label><input class="field-input" id="logSubject" required maxlength="48" placeholder="e.g. History" />
@@ -104,7 +104,7 @@
         <label class="field-label" for="notesInput">Next step or other notes <span>optional</span></label><textarea class="field-input field-textarea" id="notesInput" maxlength="240" placeholder="A reminder, question, or next action…"></textarea>
         <div class="log-meta-row"><span id="plannedForLabel"></span><label class="status-select-label">Session result <select id="statusInput" class="status-select"><option value="completed">Completed</option><option value="partial">Partly completed</option><option value="missed">Missed / no study</option></select></label></div>
         <p class="form-error" id="logError" role="alert"></p>
-        <div class="modal-actions"><button class="button button-quiet" value="cancel">Cancel</button><button class="button button-dark" id="saveLogBtn" value="save">Save study log</button></div>
+        <div class="modal-actions"><button class="button button-quiet" value="cancel" formnovalidate>Cancel</button><button class="button button-dark" id="saveLogBtn" value="save">Save study log</button></div>
       </form>
     </dialog>
 
@@ -126,11 +126,11 @@
       </section>
     </dialog>
 
-    <dialog class="modal small-modal" id="nameDialog"><form method="dialog" id="nameForm"><div class="modal-top"><div><p class="eyebrow">MAKE IT YOURS</p><h2>What should we call you?</h2></div><button class="icon-button close-modal" aria-label="Close">×</button></div><label class="field-label" for="nameInput">Your name</label><input class="field-input" id="nameInput" maxlength="32" placeholder="Your name" /><div class="modal-actions"><button class="button button-quiet" value="cancel">Cancel</button><button class="button button-dark" id="saveNameBtn" value="save">Save name</button></div></form></dialog>
+    <dialog class="modal small-modal" id="nameDialog"><form method="dialog" id="nameForm"><div class="modal-top"><div><p class="eyebrow">MAKE IT YOURS</p><h2>What should we call you?</h2></div><button type="button" class="icon-button close-modal" data-close-dialog="nameDialog" aria-label="Close">×</button></div><label class="field-label" for="nameInput">Your name</label><input class="field-input" id="nameInput" maxlength="32" placeholder="Your name" /><div class="modal-actions"><button class="button button-quiet" value="cancel" formnovalidate>Cancel</button><button class="button button-dark" id="saveNameBtn" value="save">Save name</button></div></form></dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="supabase-config.js"></script>
-    <script src="app.js?v=3"></script>
+    <script src="app.js?v=4"></script>
   </body>
 </html>
