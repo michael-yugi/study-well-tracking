@@ -173,12 +173,25 @@
       return `<section class="day-card"><div class="day-card-header"><span class="day-title">${DAYS[day]}<span class="day-count">${sessions.length ? `${sessions.length} ${sessions.length === 1 ? "session" : "sessions"}` : "—"}</span></span>${isParentView() ? "" : `<button class="small-action add-day-session" data-day="${day}" aria-label="Add session on ${DAYS[day]}" title="Add a session">＋</button>`}</div><div class="day-card-content">${entries || `<div class="empty-day">No study blocks planned.</div>`}</div></section>`;
     }).join("");
   }
+  function topicProgressLabel(progress) {
+    return ({ completed: "Topic completed", in_progress: "In progress", needs_help: "Needs more help", not_started: "Not started" })[progress] || "In progress";
+  }
+  function reflectionMarkup(label, value) {
+    return value ? `<div class="reflection-item"><strong>${label}</strong><p>${escapeHTML(value)}</p></div>` : "";
+  }
   function renderHistory() {
     const query = $("logSearch").value.trim().toLowerCase();
-    const logs = [...state.logs].filter((log) => `${log.subject} ${log.topic} ${log.notes || ""}`.toLowerCase().includes(query)).sort((a, b) => `${b.date}${b.createdAt || ""}`.localeCompare(`${a.date}${a.createdAt || ""}`));
+    const logs = [...state.logs].filter((log) => `${log.subject} ${log.topic} ${log.topicAbout || ""} ${log.whatLearned || ""} ${log.notUnderstood || ""} ${log.notes || ""}`.toLowerCase().includes(query)).sort((a, b) => `${b.date}${b.createdAt || ""}`.localeCompare(`${a.date}${a.createdAt || ""}`));
     $("historyCount").textContent = `${logs.length} ${logs.length === 1 ? "study session" : "study sessions"}`;
     if (!logs.length) { $("historyList").innerHTML = query ? `<div class="empty-history"><strong>No matches yet</strong><span>Try a different subject or topic.</span></div>` : `<div class="empty-history"><span class="empty-plan-icon">◷</span><strong>Your learning starts here</strong><span>Log a session to keep track of what you studied.</span></div>`; return; }
-    $("historyList").innerHTML = logs.map((log) => `<article class="history-card"><div class="history-card-top"><div class="history-subject"><div class="subject-badge color-${(log.subject.charCodeAt(0) || 0) % 4}">${escapeHTML(log.subject.trim().charAt(0).toUpperCase())}</div><div><strong>${escapeHTML(log.subject)}</strong><span>${formatDate(fromISO(log.date), { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div></div><span class="duration-pill">${durationLabel(log.minutes)} studied</span></div><div class="history-topic">${escapeHTML(log.topic)}</div>${log.notes ? `<div class="history-notes">${escapeHTML(log.notes)}</div>` : ""}<div class="history-foot"><span>${log.plannedStart ? `Planned ${formatTime(log.plannedStart)}${log.plannedEnd ? `–${formatTime(log.plannedEnd)}` : ""}` : "Independent study"}</span><span class="status-pill ${log.status === "partial" ? "partial" : ""}">${log.status === "partial" ? "Partly completed" : log.status === "missed" ? "Missed session" : log.sessionId ? "Completed as planned" : "Study logged"}</span></div></article>`).join("");
+    $("historyList").innerHTML = logs.map((log) => {
+      const reflections = [
+        reflectionMarkup("What this topic is about", log.topicAbout),
+        reflectionMarkup("What I learned", log.whatLearned),
+        reflectionMarkup("What I didn’t understand properly", log.notUnderstood),
+      ].join("");
+      return `<article class="history-card"><div class="history-card-top"><div class="history-subject"><div class="subject-badge color-${(log.subject.charCodeAt(0) || 0) % 4}">${escapeHTML(log.subject.trim().charAt(0).toUpperCase())}</div><div><strong>${escapeHTML(log.subject)}</strong><span>${formatDate(fromISO(log.date), { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div></div><span class="duration-pill">${durationLabel(log.minutes)} studied</span></div><div class="history-topic">${escapeHTML(log.topic)}</div>${reflections ? `<div class="history-reflections">${reflections}</div>` : ""}${log.notes ? `<div class="history-notes"><strong>Next step or other notes</strong><p>${escapeHTML(log.notes)}</p></div>` : ""}<div class="history-foot"><span>${log.plannedStart ? `Planned ${formatTime(log.plannedStart)}${log.plannedEnd ? `–${formatTime(log.plannedEnd)}` : ""}` : "Independent study"}</span><span class="topic-progress-pill">${topicProgressLabel(log.topicProgress)}</span><span class="status-pill ${log.status === "partial" ? "partial" : ""}">${log.status === "partial" ? "Partly completed" : log.status === "missed" ? "Missed session" : log.sessionId ? "Completed as planned" : "Study logged"}</span></div></article>`;
+    }).join("");
   }
   function navigate(view) {
     document.querySelectorAll(".page-view").forEach((page) => page.classList.toggle("active", page.id === `${view}View`));
@@ -199,18 +212,21 @@
   function openLogDialog({ session = null, log = null, minutes = null, timer = false } = {}) {
     const readOnly = isParentView();
     $("logForm").reset(); $("logError").textContent = "";
-    ["logSubject", "topicInput", "minutesInput", "logDateInput", "notesInput", "statusInput"].forEach((id) => { $(id).disabled = false; });
+    ["logSubject", "topicInput", "topicAboutInput", "learnedInput", "topicProgressInput", "notUnderstoodInput", "minutesInput", "logDateInput", "notesInput", "statusInput"].forEach((id) => { $(id).disabled = false; });
     $("saveLogBtn").hidden = false;
     $("logSessionId").value = log?.sessionId || session?.id || "";
     $("logEyebrow").textContent = timer ? "NICE WORK — MAKE A NOTE OF IT" : log ? "YOUR STUDY NOTES" : "MAKE A NOTE OF IT";
     $("logTitle").textContent = readOnly ? "Study record" : log ? "Update study log" : "Log study time";
     $("logSubject").value = log?.subject || session?.subject || "";
     $("topicInput").value = log?.topic || "";
+    $("topicAboutInput").value = log?.topicAbout || ""; $("learnedInput").value = log?.whatLearned || "";
+    $("topicProgressInput").value = log?.topicProgress || (log?.status === "missed" ? "not_started" : "in_progress");
+    $("notUnderstoodInput").value = log?.notUnderstood || "";
     $("minutesInput").value = log ? log.minutes : minutes ?? (session ? Math.max(1, minutesFromTime(session.end) - minutesFromTime(session.start)) : "");
     $("logDateInput").value = log?.date || todayISO(); $("logDateInput").max = todayISO(); $("notesInput").value = log?.notes || ""; $("statusInput").value = log?.status || "completed";
     $("plannedForLabel").textContent = session ? `Planned ${formatTime(session.start)}–${formatTime(session.end)}` : log?.plannedStart ? `Planned ${formatTime(log.plannedStart)}–${formatTime(log.plannedEnd)}` : "Independent study";
     $("timerBanner").hidden = !timer; $("saveLogBtn").textContent = log ? "Save changes" : "Save study log"; updateLogStatusFields();
-    ["logSubject", "topicInput", "minutesInput", "logDateInput", "notesInput", "statusInput"].forEach((id) => { $(id).disabled = readOnly; });
+    ["logSubject", "topicInput", "topicAboutInput", "learnedInput", "topicProgressInput", "notUnderstoodInput", "minutesInput", "logDateInput", "notesInput", "statusInput"].forEach((id) => { $(id).disabled = readOnly || (id !== "logSubject" && id !== "logDateInput" && id !== "notesInput" && $("statusInput").value === "missed"); });
     $("saveLogBtn").hidden = readOnly;
     $("logDialog").showModal(); if (timer) updateTimerText(); if (!readOnly) $("topicInput").focus();
   }
@@ -234,7 +250,7 @@
     if (state.activeTimer && session && state.activeTimer.sessionId === session.id) finishTimerState();
     const date = $("logDateInput").value; const priorIndex = state.logs.findIndex((log) => log.sessionId === id && id && log.date === date);
     const prior = priorIndex >= 0 ? state.logs[priorIndex] : null;
-    const entry = { id: prior?.id || uid(), sessionId: id || null, date, subject: $("logSubject").value.trim(), topic: status === "missed" ? topic || "Session missed" : topic, minutes, notes: $("notesInput").value.trim(), status, plannedStart: session?.start || prior?.plannedStart || null, plannedEnd: session?.end || prior?.plannedEnd || null, createdAt: prior?.createdAt || new Date().toISOString() };
+    const entry = { id: prior?.id || uid(), sessionId: id || null, date, subject: $("logSubject").value.trim(), topic: status === "missed" ? topic || "Session missed" : topic, topicAbout: status === "missed" ? "" : $("topicAboutInput").value.trim(), whatLearned: status === "missed" ? "" : $("learnedInput").value.trim(), topicProgress: status === "missed" ? "not_started" : $("topicProgressInput").value, notUnderstood: status === "missed" ? "" : $("notUnderstoodInput").value.trim(), minutes, notes: $("notesInput").value.trim(), status, plannedStart: session?.start || prior?.plannedStart || null, plannedEnd: session?.end || prior?.plannedEnd || null, createdAt: prior?.createdAt || new Date().toISOString() };
     if (priorIndex >= 0) state.logs[priorIndex] = entry; else state.logs.push(entry);
     saveState(); $("logDialog").close(); renderOverview(); renderHistory();
     if (isStudentAccount()) void syncLog(entry);
@@ -243,7 +259,7 @@
   function markMissed(session) {
     const existing = getOccurrenceLog(session.id, todayISO());
     if (existing) return;
-    state.logs.push({ id: uid(), sessionId: session.id, date: todayISO(), subject: session.subject, topic: "Session missed", minutes: 0, notes: "", status: "missed", plannedStart: session.start, plannedEnd: session.end, createdAt: new Date().toISOString() });
+    state.logs.push({ id: uid(), sessionId: session.id, date: todayISO(), subject: session.subject, topic: "Session missed", topicAbout: "", whatLearned: "", topicProgress: "not_started", notUnderstood: "", minutes: 0, notes: "", status: "missed", plannedStart: session.start, plannedEnd: session.end, createdAt: new Date().toISOString() });
     saveState(); renderOverview(); renderHistory(); if (isStudentAccount()) void syncLog(state.logs[state.logs.length - 1]); showToast("Session marked as missed");
   }
   function updateLogStatusFields() {
@@ -253,6 +269,9 @@
     $("minutesInput").disabled = missed;
     if (missed) $("minutesInput").value = "0";
     else if ($("minutesInput").value === "0") $("minutesInput").value = "";
+    ["topicAboutInput", "learnedInput", "topicProgressInput", "notUnderstoodInput"].forEach((id) => { $(id).disabled = missed || isParentView(); });
+    if (missed) $("topicProgressInput").value = "not_started";
+    else if ($("topicProgressInput").value === "not_started") $("topicProgressInput").value = "in_progress";
   }
 
   function isStudentAccount() { return Boolean(authUser && accountProfile?.account_type === "student"); }
@@ -314,6 +333,7 @@
     return {
       student_id: studentId, id: log.id, session_id: log.sessionId || null, study_date: log.date,
       subject: log.subject, topic: log.topic, minutes: Number(log.minutes || 0), notes: log.notes || "",
+      topic_about: log.topicAbout || "", what_learned: log.whatLearned || "", topic_progress: log.topicProgress || "in_progress", not_understood: log.notUnderstood || "",
       status: log.status, planned_start: log.plannedStart || null, planned_end: log.plannedEnd || null,
       created_at: log.createdAt || new Date().toISOString(),
     };
@@ -321,7 +341,7 @@
   function fromRemoteLog(row) {
     return {
       id: row.id, sessionId: row.session_id, date: row.study_date, subject: row.subject, topic: row.topic,
-      minutes: row.minutes, notes: row.notes || "", status: row.status, plannedStart: row.planned_start,
+      minutes: row.minutes, notes: row.notes || "", topicAbout: row.topic_about || "", whatLearned: row.what_learned || "", topicProgress: row.topic_progress || "in_progress", notUnderstood: row.not_understood || "", status: row.status, plannedStart: row.planned_start,
       plannedEnd: row.planned_end, createdAt: row.created_at,
     };
   }

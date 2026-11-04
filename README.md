@@ -28,6 +28,10 @@ Cloud sync uses Supabase. The browser contains only the project's publishable ke
 5. Choose **Ann's timetable** or **Lewi's timetable** at signup. Each student's schedule and study log belong to that student's account; students can edit their timetable later. Parents can create another link code for every additional student, refresh the linked-student list, and select a student from the top bar.
 6. Study logs and timetables sync from each student account. The parent signs in to view linked students and their records.
 
+After a lesson, students can record the topic, explain what it covers, summarize what they learned, mark topic progress, and note what they did not understand. These reflections are searchable in the study log and sync with the rest of the student's record.
+
+If the original Supabase setup SQL was already run, run the current `supabase-setup.sql` again to add the reflection fields to the existing table. It keeps existing study logs.
+
 Each person should use their own account; do not share passwords. Link codes expire after 24 hours and can be used once. Parents can view records but cannot edit the student's timetable or logs. If a browser is offline, its local copy remains available and sync retries when the connection returns.
 
 Without signing in, the tracker continues to store data only in that browser's local storage.

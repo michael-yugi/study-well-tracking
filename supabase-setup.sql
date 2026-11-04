@@ -35,6 +35,11 @@ create table if not exists public.study_logs (
   study_date date not null,
   subject text not null,
   topic text not null,
+  topic_about text not null default '',
+  what_learned text not null default '',
+  topic_progress text not null default 'in_progress'
+    check (topic_progress in ('completed', 'in_progress', 'needs_help', 'not_started')),
+  not_understood text not null default '',
   minutes integer not null check (minutes between 0 and 1440),
   notes text not null default '',
   status text not null check (status in ('completed', 'partial', 'missed')),
@@ -43,6 +48,13 @@ create table if not exists public.study_logs (
   created_at timestamptz not null default now(),
   primary key (student_id, id)
 );
+
+alter table public.study_logs
+  add column if not exists topic_about text not null default '',
+  add column if not exists what_learned text not null default '',
+  add column if not exists topic_progress text not null default 'in_progress'
+    check (topic_progress in ('completed', 'in_progress', 'needs_help', 'not_started')),
+  add column if not exists not_understood text not null default '';
 
 create index if not exists study_logs_student_date_idx
   on public.study_logs (student_id, study_date desc);
