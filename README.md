@@ -24,8 +24,9 @@ Cloud sync uses Supabase. The browser contains only the project's publishable ke
 1. In the Supabase project, open **SQL Editor**, create a query, paste all of `supabase-setup.sql`, and run it once.
 2. In **Authentication → URL Configuration**, add `https://michael-yugi.github.io/study-well-tracking/` to the redirect URL allow list.
 3. Open the tracker and create a **Parent / teacher** account. Sign in and choose **Create student link code**.
-4. Have the student open the same tracker, create their own **Student** account, and enter the one-time code from the parent.
-5. Study logs and the timetable sync from the student account. The parent signs in to view linked students and their records.
+4. Have each student open the same tracker, create a separate **Student** account, choose their starting timetable, and enter their own one-time code from the parent.
+5. Choose **Ann's timetable** or **Lewi's timetable** at signup. Each student's schedule and study log belong to that student's account; students can edit their timetable later. Parents can create another link code for every additional student, refresh the linked-student list, and select a student from the top bar.
+6. Study logs and timetables sync from each student account. The parent signs in to view linked students and their records.
 
 Each person should use their own account; do not share passwords. Link codes expire after 24 hours and can be used once. Parents can view records but cannot edit the student's timetable or logs. If a browser is offline, its local copy remains available and sync retries when the connection returns.
 

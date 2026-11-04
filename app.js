@@ -20,21 +20,32 @@
     { start: "14:00", end: "15:00", label: "Lesson 4", subjects: ["Social Studies", "Kiswahili", "Creative Arts", "CRE", "Social Studies"] },
     { start: "15:00", end: "16:00", label: "Lesson 5", subjects: ["Creative Arts", "Social Studies", "English", "English", "English"] },
   ];
-  const LEWI_TIMETABLE = WEEKDAY_ROWS.flatMap((row, rowIndex) => row.subjects.map((subject, index) => ({
-    id: `lewi-${index + 1}-${rowIndex}`,
-    day: index + 1,
-    start: row.start,
-    end: row.end,
-    subject,
-    focus: row.label,
-  }))).concat({
-    id: "lewi-saturday-revision",
-    day: 6,
-    start: "08:00",
-    end: "11:00",
-    subject: "Revision",
-    focus: "Review weekly topics, practise questions, revisit difficult topics",
-  });
+  const ANN_WEEKDAY_ROWS = [
+    { start: "06:00", end: "07:00", label: "Morning prep", subjects: ["Kiswahili", "Maths", "English", "Science", "Pre-Technical"] },
+    { start: "09:00", end: "10:00", label: "Lesson 1", subjects: ["Maths", "Kiswahili", "Social Studies", "CRE", "Creative Arts"] },
+    { start: "10:00", end: "11:00", label: "Lesson 2", subjects: ["CRE", "Pre-Technical", "Agriculture", "Kiswahili", "English"] },
+    { start: "12:30", end: "13:00", label: "Lesson 3", subjects: ["Social Studies", "Creative Arts", "Science", "English", "Pre-Technical"] },
+    { start: "14:30", end: "15:00", label: "Lesson 4", subjects: ["Agriculture", "Pre-Technical", "CRE", "Maths", "Maths"] },
+  ];
+  function buildTimetable(rows, prefix) {
+    return rows.flatMap((row, rowIndex) => row.subjects.map((subject, index) => ({
+      id: `${prefix}-${index + 1}-${rowIndex}`,
+      day: index + 1,
+      start: row.start,
+      end: row.end,
+      subject,
+      focus: row.label,
+    }))).concat({
+      id: `${prefix}-saturday-revision`,
+      day: 6,
+      start: "08:00",
+      end: "11:00",
+      subject: "Revision",
+      focus: "Review weekly topics, practise questions, do exams, revisit difficult topics",
+    });
+  }
+  const LEWI_TIMETABLE = buildTimetable(WEEKDAY_ROWS, "lewi");
+  const ANN_TIMETABLE = buildTimetable(ANN_WEEKDAY_ROWS, "ann");
   const defaultState = { name: "Student", schedule: LEWI_TIMETABLE, logs: [], activeTimer: null, timetableImported: true };
   let authUser = null;
   let accountProfile = null;
@@ -263,6 +274,14 @@
     }
     setCloudStatus(authUser ? (parent ? "Parent view: synced study logs are read-only." : "Student data is syncing to your account.") : "Study data stays on this device until you sign in.");
   }
+  function renderLinkedStudentsList() {
+    $("linkedStudentsList").replaceChildren(...linkedStudents.map((student) => {
+      const item = document.createElement("div"); item.className = "linked-student"; item.textContent = `${student.display_name} · linked student`; return item;
+    }));
+  }
+  function updateSignupTimetableVisibility() {
+    $("studentTimetableFields").hidden = authMode !== "signup" || $("accountType").value !== "student";
+  }
   function setAccountMode(mode) {
     authMode = mode;
     document.querySelectorAll(".auth-mode").forEach((button) => button.classList.toggle("active", button.dataset.mode === mode));
@@ -270,6 +289,7 @@
     $("accountDialogTitle").textContent = mode === "signup" ? "Create a Studywell account" : "Sync your study data";
     $("accountSubmit").textContent = mode === "signup" ? "Create account" : "Sign in";
     $("accountError").textContent = "";
+    updateSignupTimetableVisibility();
   }
   function openAccountDialog() {
     $("accountError").textContent = ""; $("linkError").textContent = "";
@@ -278,7 +298,8 @@
       $("accountDialogTitle").textContent = "Cloud sync";
       $("signedInSummary").textContent = `${accountProfile?.display_name || authUser.email} · ${isParentView() ? "Parent / teacher" : "Student"}`;
       $("parentTools").hidden = !isParentView(); $("studentTools").hidden = !isStudentAccount();
-      $("linkedStudentsList").replaceChildren(...linkedStudents.map((student) => { const item = document.createElement("div"); item.className = "linked-student"; item.textContent = `${student.display_name} · linked student`; return item; }));
+      $("createInviteBtn").textContent = linkedStudents.length ? "Create another student code" : "Create student link code";
+      renderLinkedStudentsList();
     } else setAccountMode("signin");
     $("accountDialog").showModal();
   }
@@ -368,7 +389,7 @@
     }
     const { data: profiles, error: profileError } = await supabaseClient.from("study_profiles").select("id,display_name,timetable").in("id", ids);
     if (profileError) throw profileError;
-    linkedStudents = profiles || [];
+    linkedStudents = (profiles || []).sort((a, b) => (a.display_name || "").localeCompare(b.display_name || ""));
     if (!linkedStudents.some((student) => student.id === selectedStudentId)) selectedStudentId = linkedStudents[0]?.id || null;
     await loadSelectedStudent();
   }
@@ -379,6 +400,16 @@
     try { state.logs = await fetchStudentLogs(student.id); setCloudStatus(`Viewing ${student.display_name}'s synced study logs.`); }
     catch (error) { setCloudStatus("Could not load this student's cloud logs."); }
     renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
+  }
+  async function refreshParentStudents() {
+    if (!isParentView()) return;
+    $("refreshStudentsBtn").disabled = true; $("linkError").textContent = "";
+    try {
+      await loadParentStudents(); renderCloudControls(); renderLinkedStudentsList(); renderOverview();
+      if ($("historyView").classList.contains("active")) renderHistory();
+      $("linkError").textContent = linkedStudents.length ? "Student list refreshed." : "No students linked yet. Create a separate code for each student.";
+    } catch (error) { $("linkError").textContent = error.message || "Could not refresh the student list."; }
+    finally { $("refreshStudentsBtn").disabled = false; }
   }
   async function handleAuthSession(session) {
     if (!session) {
@@ -415,9 +446,13 @@
       if (authMode === "signup") {
         const displayName = $("accountName").value.trim();
         if (!displayName) { $("accountError").textContent = "Add your name to create an account."; return; }
+        const accountType = $("accountType").value;
+        const selectedTimetable = $("signupTimetable").value;
+        if (accountType === "student" && !selectedTimetable) { $("accountError").textContent = "Choose the timetable for this student."; return; }
+        const initialTimetable = accountType === "student" ? (selectedTimetable === "ann" ? ANN_TIMETABLE : LEWI_TIMETABLE) : [];
         const { data, error } = await supabaseClient.auth.signUp({
           email, password,
-          options: { data: { display_name: displayName, account_type: $("accountType").value }, emailRedirectTo: `${window.location.origin}${window.location.pathname}` },
+          options: { data: { display_name: displayName, account_type: accountType, timetable: initialTimetable }, emailRedirectTo: `${window.location.origin}${window.location.pathname}` },
         });
         if (error) throw error;
         if (data.session) { await handleAuthSession(data.session); $("accountDialog").close(); showToast("Studywell account created"); }
@@ -458,8 +493,10 @@
   $("quickLogBtn").addEventListener("click", () => openLogDialog()); $("historyLogBtn").addEventListener("click", () => openLogDialog()); $("addSessionBtn").addEventListener("click", () => { if (!isParentView()) openSessionDialog(); });
   $("syncAccountBtn").addEventListener("click", openAccountDialog);
   document.querySelectorAll(".auth-mode").forEach((button) => button.addEventListener("click", () => setAccountMode(button.dataset.mode)));
+  $("accountType").addEventListener("change", updateSignupTimetableVisibility);
   $("accountSubmit").addEventListener("click", () => void submitAccountForm());
   $("createInviteBtn").addEventListener("click", () => void createInviteCode());
+  $("refreshStudentsBtn").addEventListener("click", () => void refreshParentStudents());
   $("copyInviteBtn").addEventListener("click", async () => {
     try { await navigator.clipboard.writeText($("inviteCodeText").textContent); showToast("Link code copied"); }
     catch (_) { $("linkError").textContent = "Copy was unavailable. Select and copy the code above."; }

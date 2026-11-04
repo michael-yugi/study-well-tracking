@@ -60,7 +60,6 @@
           </div>
 
           <section class="panel recent-panel"><div class="panel-heading"><div><p class="eyebrow">LOOKING BACK</p><h2>Recently studied</h2></div><button class="text-button" data-go="history">Full study log <span>↗</span></button></div><div id="recentLogs" class="recent-list"></div></section>
-          <footer class="app-footer"><span>Small, steady sessions add up.</span><span>Keep showing up <span class="footer-heart">♥</span></span></footer>
         </section>
 
         <section class="page-view" id="timetableView">
@@ -74,6 +73,7 @@
           <div class="history-toolbar"><div class="history-count" id="historyCount">0 study sessions</div><label class="search-box"><span>⌕</span><input id="logSearch" type="search" placeholder="Search subjects or topics" aria-label="Search study log" /></label></div>
           <div id="historyList" class="history-list"></div>
         </section>
+        <footer class="app-footer"><span>Small, steady sessions add up.</span><span>Keep showing up <span class="footer-heart">♥</span></span><span class="footer-credit">Created by <strong>Michael Yugi</strong></span></footer>
       </main>
     </div>
 
@@ -108,7 +108,7 @@
       <div class="modal-top"><div><p class="eyebrow">CLOUD SYNC</p><h2 id="accountDialogTitle">Sync your study data</h2></div><button class="icon-button close-modal" data-close-account aria-label="Close">×</button></div>
       <section id="authPanel">
         <div class="auth-mode-row"><button class="auth-mode active" data-mode="signin">Sign in</button><button class="auth-mode" data-mode="signup">Create account</button></div>
-        <div id="signupFields" hidden><label class="field-label" for="accountName">Your name</label><input class="field-input" id="accountName" maxlength="48" placeholder="e.g. Alex" /><label class="field-label" for="accountType">Account type</label><select class="field-input" id="accountType"><option value="student">Student</option><option value="parent">Parent / teacher</option></select><p class="account-hint">Create a separate account for each person. A parent can link to a student with a one-time code.</p></div>
+        <div id="signupFields" hidden><label class="field-label" for="accountName">Your name</label><input class="field-input" id="accountName" maxlength="48" placeholder="e.g. Ann" /><label class="field-label" for="accountType">Account type</label><select class="field-input" id="accountType"><option value="student">Student</option><option value="parent">Parent / teacher</option></select><div id="studentTimetableFields" hidden><label class="field-label" for="signupTimetable">Starting timetable</label><select class="field-input" id="signupTimetable"><option value="" selected>Choose a timetable</option><option value="ann">Ann’s timetable</option><option value="lewi">Lewi’s timetable</option></select><p class="account-hint">Each student has a separate timetable and study log. They can edit their timetable after signing in.</p></div><p class="account-hint">Create a separate account for each person. A parent can link to multiple students, one at a time with a separate code for each.</p></div>
         <label class="field-label" for="accountEmail">Email</label><input class="field-input" id="accountEmail" type="email" autocomplete="username" required placeholder="you@example.com" />
         <label class="field-label" for="accountPassword">Password</label><input class="field-input" id="accountPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="At least 8 characters" />
         <p class="form-error" id="accountError" role="alert"></p><p class="account-hint" id="cloudMessage">Study logs will sync across your signed-in devices.</p>
@@ -116,7 +116,7 @@
       </section>
       <section id="linkPanel" hidden>
         <p class="account-hint" id="signedInSummary"></p>
-        <div id="parentTools" hidden><button class="button button-dark" id="createInviteBtn">Create student link code</button><div class="invite-code-box" id="inviteCodeBox" hidden><span>Share this one-time code with the student:</span><strong id="inviteCodeText"></strong><button class="button button-quiet" id="copyInviteBtn">Copy code</button></div><div class="linked-students" id="linkedStudentsList"></div></div>
+        <div id="parentTools" hidden><p class="account-hint">Create a separate one-time code for each student. Each linked student keeps an independent timetable and study log.</p><button class="button button-dark" id="createInviteBtn">Create student link code</button><button class="button button-quiet refresh-students-button" id="refreshStudentsBtn">Refresh student list</button><div class="invite-code-box" id="inviteCodeBox" hidden><span>Share this one-time code with the student:</span><strong id="inviteCodeText"></strong><button class="button button-quiet" id="copyInviteBtn">Copy code</button></div><div class="linked-students" id="linkedStudentsList"></div></div>
         <div id="studentTools" hidden><label class="field-label" for="parentCodeInput">Parent link code</label><input class="field-input" id="parentCodeInput" maxlength="32" autocomplete="off" placeholder="Paste the code from your parent" /><button class="button button-dark redeem-button" id="redeemInviteBtn">Link to parent</button><p class="account-hint">Only share this code with your parent or teacher. Once linked, they can view your study logs.</p></div>
         <p class="form-error" id="linkError" role="alert"></p><div class="modal-actions"><button class="button button-quiet" id="signOutBtn">Sign out</button></div>
       </section>

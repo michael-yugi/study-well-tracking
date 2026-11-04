@@ -54,7 +54,7 @@ security definer
 set search_path = ''
 as $$
 begin
-  insert into public.study_profiles (id, display_name, account_type)
+  insert into public.study_profiles (id, display_name, account_type, timetable)
   values (
     new.id,
     coalesce(
@@ -62,7 +62,9 @@ begin
       nullif(pg_catalog.split_part(coalesce(new.email, ''), '@', 1), ''),
       'Student'
     ),
-    case when new.raw_user_meta_data ->> 'account_type' = 'parent' then 'parent' else 'student' end
+    case when new.raw_user_meta_data ->> 'account_type' = 'parent' then 'parent' else 'student' end,
+    case when pg_catalog.jsonb_typeof(new.raw_user_meta_data -> 'timetable') = 'array'
+      then new.raw_user_meta_data -> 'timetable' else '[]'::jsonb end
   )
   on conflict (id) do nothing;
   return new;
@@ -75,7 +77,7 @@ create trigger study_auth_user_created
   for each row execute function public.handle_new_study_user();
 
 -- Also cover an account created before this setup script was run.
-insert into public.study_profiles (id, display_name, account_type)
+insert into public.study_profiles (id, display_name, account_type, timetable)
 select
   u.id,
   coalesce(
@@ -83,7 +85,9 @@ select
     nullif(pg_catalog.split_part(coalesce(u.email, ''), '@', 1), ''),
     'Student'
   ),
-  case when u.raw_user_meta_data ->> 'account_type' = 'parent' then 'parent' else 'student' end
+  case when u.raw_user_meta_data ->> 'account_type' = 'parent' then 'parent' else 'student' end,
+  case when pg_catalog.jsonb_typeof(u.raw_user_meta_data -> 'timetable') = 'array'
+    then u.raw_user_meta_data -> 'timetable' else '[]'::jsonb end
 from auth.users u
 on conflict (id) do nothing;
 
