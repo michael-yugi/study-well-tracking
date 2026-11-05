@@ -1,6 +1,7 @@
 (() => {
   const STORAGE_KEY = "studywell-tracker-v1";
   const LOCAL_MIGRATION_KEY = "studywell-local-imported-v1";
+  const PUBLIC_APP_URL = "https://michael-yugi.github.io/study-well-tracking/";
   const supabaseClient = window.STUDYWELL_SUPABASE && window.supabase?.createClient
     ? window.supabase.createClient(window.STUDYWELL_SUPABASE.url, window.STUDYWELL_SUPABASE.publishableKey)
     : null;
@@ -504,7 +505,7 @@
         const accountType = $("accountType").value;
         const { data, error } = await supabaseClient.auth.signUp({
           email, password,
-          options: { data: { display_name: displayName, account_type: accountType }, emailRedirectTo: `${window.location.origin}${window.location.pathname}` },
+          options: { data: { display_name: displayName, account_type: accountType }, emailRedirectTo: PUBLIC_APP_URL },
         });
         if (error) throw error;
         if (data.session) { await handleAuthSession(data.session); $("accountDialog").close(); showToast("Studywell account created"); }
