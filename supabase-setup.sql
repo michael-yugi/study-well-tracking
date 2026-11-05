@@ -1,13 +1,21 @@
--- Studywell cloud sync: run once in Supabase SQL Editor.
--- Browser access uses only the publishable key. Row-level security protects all records.
+-- Studywell cloud sync and role security.
+-- Run this in the Supabase SQL Editor as the project owner.
+-- Public sign-up can create Parent or Student accounts only. Assign Admin manually
+-- to the intended owner account after that account has signed up; example at bottom.
 
 create table if not exists public.study_profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   display_name text not null default 'Student',
-  account_type text not null check (account_type in ('student', 'parent')),
+  account_type text not null default 'student',
   timetable jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );
+
+alter table public.study_profiles
+  drop constraint if exists study_profiles_account_type_check;
+alter table public.study_profiles
+  add constraint study_profiles_account_type_check
+  check (account_type in ('student', 'parent', 'admin'));
 
 create table if not exists public.study_access (
   parent_id uuid not null references public.study_profiles(id) on delete cascade,
@@ -59,6 +67,7 @@ alter table public.study_logs
 create index if not exists study_logs_student_date_idx
   on public.study_logs (student_id, study_date desc);
 
+-- A signup can request Parent or Student. Admin is never accepted from metadata.
 create or replace function public.handle_new_study_user()
 returns trigger
 language plpgsql
@@ -75,8 +84,7 @@ begin
       'Student'
     ),
     case when new.raw_user_meta_data ->> 'account_type' = 'parent' then 'parent' else 'student' end,
-    case when pg_catalog.jsonb_typeof(new.raw_user_meta_data -> 'timetable') = 'array'
-      then new.raw_user_meta_data -> 'timetable' else '[]'::jsonb end
+    '[]'::jsonb
   )
   on conflict (id) do nothing;
   return new;
@@ -98,10 +106,37 @@ select
     'Student'
   ),
   case when u.raw_user_meta_data ->> 'account_type' = 'parent' then 'parent' else 'student' end,
-  case when pg_catalog.jsonb_typeof(u.raw_user_meta_data -> 'timetable') = 'array'
-    then u.raw_user_meta_data -> 'timetable' else '[]'::jsonb end
+  '[]'::jsonb
 from auth.users u
 on conflict (id) do nothing;
+
+-- These SECURITY DEFINER checks read the private profile table without triggering
+-- recursive row-level-security policies.
+create or replace function public.is_studywell_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.study_profiles
+    where id = (select auth.uid()) and account_type = 'admin'
+  );
+$$;
+
+create or replace function public.is_studywell_student()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.study_profiles
+    where id = (select auth.uid()) and account_type = 'student'
+  );
+$$;
 
 create or replace function public.create_study_invite()
 returns text
@@ -116,7 +151,7 @@ declare
 begin
   if v_user is null then raise exception 'Sign in first'; end if;
   select account_type into v_type from public.study_profiles where id = v_user;
-  if v_type is distinct from 'parent' then raise exception 'Only a parent account can create a link code'; end if;
+  if v_type not in ('parent', 'admin') then raise exception 'Only a parent or admin account can create a link code'; end if;
 
   v_code := pg_catalog.upper(pg_catalog.replace(pg_catalog.gen_random_uuid()::text, '-', ''));
   insert into public.study_invites (parent_id, code, expires_at)
@@ -157,14 +192,56 @@ begin
 end;
 $$;
 
+create or replace function public.update_my_display_name(p_display_name text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user uuid := (select auth.uid());
+begin
+  if v_user is null then raise exception 'Sign in first'; end if;
+  if not public.is_studywell_student() then raise exception 'Only student accounts can update their profile name'; end if;
+
+  update public.study_profiles
+  set display_name = coalesce(nullif(pg_catalog.btrim(p_display_name), ''), 'Student')
+  where id = v_user;
+end;
+$$;
+
+create or replace function public.update_student_timetable(p_student_id uuid, p_timetable jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user uuid := (select auth.uid());
+begin
+  if v_user is null then raise exception 'Sign in first'; end if;
+  if not public.is_studywell_admin() then raise exception 'Only an admin can edit student timetables'; end if;
+  if pg_catalog.jsonb_typeof(p_timetable) is distinct from 'array' then
+    raise exception 'Timetable must be a list of sessions';
+  end if;
+  if not exists (
+    select 1 from public.study_access where student_id = p_student_id
+  ) then raise exception 'You can only edit a linked student timetable'; end if;
+
+  update public.study_profiles
+  set timetable = p_timetable
+  where id = p_student_id and account_type = 'student';
+  if not found then raise exception 'Student account not found'; end if;
+end;
+$$;
+
 alter table public.study_profiles enable row level security;
 alter table public.study_access enable row level security;
 alter table public.study_invites enable row level security;
 alter table public.study_logs enable row level security;
 
-revoke all on table public.study_profiles, public.study_access, public.study_invites, public.study_logs from anon, authenticated;
+revoke all on table public.study_profiles, public.study_access, public.study_invites, public.study_logs from public, anon, authenticated;
 grant select on table public.study_profiles to authenticated;
-grant update (display_name, timetable) on table public.study_profiles to authenticated;
 grant select on table public.study_access to authenticated;
 grant select, insert, update, delete on table public.study_logs to authenticated;
 
@@ -175,25 +252,26 @@ create policy "Read own or linked profiles"
     id = (select auth.uid())
     or exists (
       select 1 from public.study_access a
-      where a.student_id = study_profiles.id and a.parent_id = (select auth.uid())
+      where a.student_id = study_profiles.id
+        and (a.parent_id = (select auth.uid()) or (select public.is_studywell_admin()))
     )
   );
 
 drop policy if exists "Update own profile" on public.study_profiles;
-create policy "Update own profile"
-  on public.study_profiles for update to authenticated
-  using (id = (select auth.uid()))
-  with check (id = (select auth.uid()));
 
 drop policy if exists "Read own link" on public.study_access;
 create policy "Read own link"
   on public.study_access for select to authenticated
-  using (parent_id = (select auth.uid()) or student_id = (select auth.uid()));
+  using (
+    parent_id = (select auth.uid())
+    or student_id = (select auth.uid())
+    or (select public.is_studywell_admin())
+  );
 
 drop policy if exists "Students read own logs" on public.study_logs;
 create policy "Students read own logs"
   on public.study_logs for select to authenticated
-  using (student_id = (select auth.uid()));
+  using (student_id = (select auth.uid()) and (select public.is_studywell_student()));
 
 drop policy if exists "Linked parents read student logs" on public.study_logs;
 create policy "Linked parents read student logs"
@@ -201,28 +279,44 @@ create policy "Linked parents read student logs"
   using (
     exists (
       select 1 from public.study_access a
-      where a.student_id = study_logs.student_id and a.parent_id = (select auth.uid())
+      where a.student_id = study_logs.student_id
+        and (a.parent_id = (select auth.uid()) or (select public.is_studywell_admin()))
     )
   );
 
 drop policy if exists "Students add own logs" on public.study_logs;
 create policy "Students add own logs"
   on public.study_logs for insert to authenticated
-  with check (student_id = (select auth.uid()));
+  with check (student_id = (select auth.uid()) and (select public.is_studywell_student()));
 
 drop policy if exists "Students update own logs" on public.study_logs;
 create policy "Students update own logs"
   on public.study_logs for update to authenticated
-  using (student_id = (select auth.uid()))
-  with check (student_id = (select auth.uid()));
+  using (student_id = (select auth.uid()) and (select public.is_studywell_student()))
+  with check (student_id = (select auth.uid()) and (select public.is_studywell_student()));
 
 drop policy if exists "Students delete own logs" on public.study_logs;
 create policy "Students delete own logs"
   on public.study_logs for delete to authenticated
-  using (student_id = (select auth.uid()));
+  using (student_id = (select auth.uid()) and (select public.is_studywell_student()));
 
+revoke all on function public.is_studywell_admin() from public, anon, authenticated;
+grant execute on function public.is_studywell_admin() to authenticated;
+revoke all on function public.is_studywell_student() from public, anon, authenticated;
+grant execute on function public.is_studywell_student() to authenticated;
 revoke all on function public.create_study_invite() from public, anon, authenticated;
 grant execute on function public.create_study_invite() to authenticated;
 revoke all on function public.redeem_study_invite(text) from public, anon, authenticated;
 grant execute on function public.redeem_study_invite(text) to authenticated;
+revoke all on function public.update_my_display_name(text) from public, anon, authenticated;
+grant execute on function public.update_my_display_name(text) to authenticated;
+drop function if exists public.update_my_study_profile(text, jsonb);
+revoke all on function public.update_student_timetable(uuid, jsonb) from public, anon, authenticated;
+grant execute on function public.update_student_timetable(uuid, jsonb) to authenticated;
 revoke all on function public.handle_new_study_user() from public, anon, authenticated;
+
+-- After the owner has created their Parent account, make it the admin account
+-- by running this separately in the SQL Editor with that account's email:
+-- update public.study_profiles
+-- set account_type = 'admin'
+-- where id = (select id from auth.users where lower(email) = lower('YOUR_ADMIN_EMAIL'));

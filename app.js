@@ -72,7 +72,7 @@
     return { ...defaultState };
   }
   function saveState() {
-    if (authUser && accountProfile?.account_type === "parent") return;
+    if (isParentView()) return;
     const key = authUser && accountProfile?.account_type === "student" ? `${STORAGE_KEY}:user:${authUser.id}` : STORAGE_KEY;
     localStorage.setItem(key, JSON.stringify(state));
   }
@@ -166,11 +166,17 @@
   }
   function renderTimetable() {
     const container = $("scheduleList");
-    if (!state.schedule.length) { container.innerHTML = `<div class="empty-timetable"><span class="empty-plan-icon">▦</span><h3>${isParentView() ? "No timetable available yet" : "Start with the plan you have"}</h3><p>${isParentView() ? "The student has not added a timetable yet." : "Add a few study blocks from your real timetable. When the time comes, start a focus timer and record what you covered."}</p>${isParentView() ? "" : `<button class="button button-dark" id="emptyAddBtn"><span class="button-plus">+</span> Add your first session</button>`}</div>`; return; }
+    if (!state.schedule.length) {
+      const noStudent = isParentView() && !selectedStudentId;
+      const heading = noStudent ? "Link a student first" : isParentView() ? "No timetable available yet" : "Start with the plan you have";
+      const copy = noStudent ? "Link a student account, then select the student to view their timetable." : isParentView() ? (isAdminAccount() ? "This student does not have a timetable yet. Add their study sessions here." : "This student does not have a timetable yet. Ask the admin to add their study sessions.") : isStudentAccount() ? "Your admin manages this timetable. Use your student account to log what you study." : "Add a few study blocks from your real timetable. When the time comes, start a focus timer and record what you covered.";
+      container.innerHTML = `<div class="empty-timetable"><span class="empty-plan-icon">▦</span><h3>${heading}</h3><p>${copy}</p>${canEditTimetable() ? `<button class="button button-dark" id="emptyAddBtn"><span class="button-plus">+</span> Add the first session</button>` : ""}</div>`; return;
+    }
     container.innerHTML = Array.from({ length: 7 }, (_, index) => (index + 1) % 7).map((day) => {
       const sessions = state.schedule.filter((item) => Number(item.day) === day).sort((a, b) => a.start.localeCompare(b.start));
-      const entries = sessions.map((session) => `<div class="schedule-entry"><span class="schedule-entry-time">${formatTime(session.start)}<br>${formatTime(session.end)}</span><span class="schedule-entry-line"></span><span class="schedule-entry-copy"><strong>${escapeHTML(session.subject)}</strong><span>${escapeHTML(session.focus || "No focus topic added")} · ${durationLabel(minutesFromTime(session.end) - minutesFromTime(session.start))}</span></span>${isParentView() ? "" : `<span class="schedule-entry-actions"><button class="small-action edit-session" data-id="${escapeHTML(session.id)}" aria-label="Edit ${escapeHTML(session.subject)}" title="Edit">✎</button><button class="small-action delete-session" data-id="${escapeHTML(session.id)}" aria-label="Delete ${escapeHTML(session.subject)}" title="Delete">×</button></span>`}</div>`).join("");
-      return `<section class="day-card"><div class="day-card-header"><span class="day-title">${DAYS[day]}<span class="day-count">${sessions.length ? `${sessions.length} ${sessions.length === 1 ? "session" : "sessions"}` : "—"}</span></span>${isParentView() ? "" : `<button class="small-action add-day-session" data-day="${day}" aria-label="Add session on ${DAYS[day]}" title="Add a session">＋</button>`}</div><div class="day-card-content">${entries || `<div class="empty-day">No study blocks planned.</div>`}</div></section>`;
+      const actions = canEditTimetable();
+      const entries = sessions.map((session) => `<div class="schedule-entry"><span class="schedule-entry-time">${formatTime(session.start)}<br>${formatTime(session.end)}</span><span class="schedule-entry-line"></span><span class="schedule-entry-copy"><strong>${escapeHTML(session.subject)}</strong><span>${escapeHTML(session.focus || "No focus topic added")} · ${durationLabel(minutesFromTime(session.end) - minutesFromTime(session.start))}</span></span>${actions ? `<span class="schedule-entry-actions"><button class="small-action edit-session" data-id="${escapeHTML(session.id)}" aria-label="Edit ${escapeHTML(session.subject)}" title="Edit">✎</button><button class="small-action delete-session" data-id="${escapeHTML(session.id)}" aria-label="Delete ${escapeHTML(session.subject)}" title="Delete">×</button></span>` : ""}</div>`).join("");
+      return `<section class="day-card"><div class="day-card-header"><span class="day-title">${DAYS[day]}<span class="day-count">${sessions.length ? `${sessions.length} ${sessions.length === 1 ? "session" : "sessions"}` : "—"}</span></span>${actions ? `<button class="small-action add-day-session" data-day="${day}" aria-label="Add session on ${DAYS[day]}" title="Add a session">＋</button>` : ""}</div><div class="day-card-content">${entries || `<div class="empty-day">No study blocks planned.</div>`}</div></section>`;
     }).join("");
   }
   function topicProgressLabel(progress) {
@@ -275,31 +281,32 @@
   }
 
   function isStudentAccount() { return Boolean(authUser && accountProfile?.account_type === "student"); }
-  function isParentView() { return Boolean(authUser && accountProfile?.account_type === "parent"); }
+  function isAdminAccount() { return Boolean(authUser && accountProfile?.account_type === "admin"); }
+  function isParentView() { return Boolean(authUser && ["parent", "admin"].includes(accountProfile?.account_type)); }
+  function canEditTimetable() { return isAdminAccount() ? Boolean(selectedStudentId) : !authUser; }
   function setCloudStatus(message) {
     const button = $("syncAccountBtn");
-    if (button) { button.textContent = authUser ? (isParentView() ? "Parent account" : "Synced account") : "Sign in to sync"; button.title = message; }
+    if (button) { button.textContent = authUser ? (isAdminAccount() ? "Admin account" : isParentView() ? "Parent account" : "Synced account") : "Sign in to sync"; button.title = message; }
     const messageEl = $("cloudMessage"); if (messageEl) messageEl.textContent = message;
   }
   function renderCloudControls() {
-    const parent = isParentView();
-    $("quickLogBtn").hidden = parent; $("historyLogBtn").hidden = parent; $("addSessionBtn").hidden = parent;
+    const parent = isParentView(); const admin = isAdminAccount();
+    $("quickLogBtn").hidden = parent; $("historyLogBtn").hidden = parent; $("addSessionBtn").hidden = !canEditTimetable();
     $("editNameBtn").hidden = parent;
+    $("adminTimetableTools").hidden = !admin || !selectedStudentId;
+    $("timetableIntro").textContent = admin ? "Edit the selected student's timetable here. Changes save to their account." : parent ? "View the selected student's timetable. The admin manages schedules." : isStudentAccount() ? "The admin manages this timetable. Use your student account to log what you study." : "Set the sessions you want to make time for. You can change your plan whenever life changes.";
     $("studentPicker").hidden = !parent || linkedStudents.length === 0;
     if (parent && linkedStudents.length) {
       const picker = $("studentPicker");
       picker.replaceChildren(...linkedStudents.map((student) => { const option = document.createElement("option"); option.value = student.id; option.textContent = student.display_name; return option; }));
       picker.value = selectedStudentId || linkedStudents[0].id;
     }
-    setCloudStatus(authUser ? (parent ? "Parent view: synced study logs are read-only." : "Student data is syncing to your account.") : "Study data stays on this device until you sign in.");
+    setCloudStatus(authUser ? (admin ? "Admin view: linked study logs are read-only; you can manage student timetables." : parent ? "Parent view: linked study logs are read-only." : "Study data is syncing to your account.") : "Study data stays on this device until you sign in.");
   }
   function renderLinkedStudentsList() {
     $("linkedStudentsList").replaceChildren(...linkedStudents.map((student) => {
       const item = document.createElement("div"); item.className = "linked-student"; item.textContent = `${student.display_name} · linked student`; return item;
     }));
-  }
-  function updateSignupTimetableVisibility() {
-    $("studentTimetableFields").hidden = authMode !== "signup" || $("accountType").value !== "student";
   }
   function setAccountMode(mode) {
     authMode = mode;
@@ -308,15 +315,17 @@
     $("accountDialogTitle").textContent = mode === "signup" ? "Create a Studywell account" : "Sync your study data";
     $("accountSubmit").textContent = mode === "signup" ? "Create account" : "Sign in";
     $("accountError").textContent = "";
-    updateSignupTimetableVisibility();
   }
   function openAccountDialog() {
     $("accountError").textContent = ""; $("linkError").textContent = "";
     $("authPanel").hidden = Boolean(authUser); $("linkPanel").hidden = !authUser;
     if (authUser) {
-      $("accountDialogTitle").textContent = "Cloud sync";
-      $("signedInSummary").textContent = `${accountProfile?.display_name || authUser.email} · ${isParentView() ? "Parent / teacher" : "Student"}`;
+      $("accountDialogTitle").textContent = isAdminAccount() ? "Admin tools" : isParentView() ? "Parent account" : "Cloud sync";
+      $("signedInSummary").textContent = `${accountProfile?.display_name || authUser.email} · ${isAdminAccount() ? "Admin" : isParentView() ? "Parent" : "Student"}`;
       $("parentTools").hidden = !isParentView(); $("studentTools").hidden = !isStudentAccount();
+      $("parentToolsIntro").textContent = isAdminAccount()
+        ? "Create a one-time code for a student, view every linked student, and manage their timetables. Study logs remain read-only."
+        : "Create a one-time code for each student. You can view linked students’ timetables and study logs; the admin manages schedules.";
       $("createInviteBtn").textContent = linkedStudents.length ? "Create another student code" : "Create student link code";
       renderLinkedStudentsList();
     } else setAccountMode("signin");
@@ -356,14 +365,39 @@
     if (error) throw error;
     return (data || []).map(fromRemoteLog);
   }
-  async function syncProfile() {
+  async function syncStudentDisplayName() {
     if (!isStudentAccount()) return;
-    const { error } = await supabaseClient.from("study_profiles").update({ display_name: state.name || "Student", timetable: state.schedule }).eq("id", authUser.id);
-    if (error) { setCloudStatus("Could not sync your timetable. Your local copy is saved."); return false; }
+    const { error } = await supabaseClient.rpc("update_my_display_name", { p_display_name: state.name || "Student" });
+    if (error) { setCloudStatus("Could not sync your name. Your local copy is saved."); return false; }
     accountProfile.display_name = state.name || accountProfile.display_name;
-    accountProfile.timetable = state.schedule;
-    setCloudStatus("Timetable synced to your account.");
+    setCloudStatus("Your name is synced to your account.");
     return true;
+  }
+  async function syncSelectedStudentTimetable() {
+    if (!isAdminAccount() || !selectedStudentId) throw new Error("Sign in as admin and select a linked student first.");
+    const { error } = await supabaseClient.rpc("update_student_timetable", { p_student_id: selectedStudentId, p_timetable: state.schedule });
+    if (error) throw error;
+    const student = linkedStudents.find((item) => item.id === selectedStudentId);
+    if (student) student.timetable = state.schedule;
+    setCloudStatus(`${student?.display_name || "Student"}'s timetable was updated.`);
+  }
+  async function applyTimetablePreset() {
+    if (!isAdminAccount() || !selectedStudentId) return;
+    const preset = $("adminTimetablePreset").value;
+    if (!preset) { setCloudStatus("Choose a starting timetable first."); return; }
+    if (state.schedule.length && !window.confirm("Replace this student's current timetable with the selected timetable?")) return;
+    const previousSchedule = state.schedule;
+    state.schedule = (preset === "ann" ? ANN_TIMETABLE : LEWI_TIMETABLE).map((session) => ({ ...session }));
+    renderTimetable(); renderOverview();
+    try {
+      await syncSelectedStudentTimetable();
+      $("adminTimetablePreset").value = "";
+      showToast("Student timetable updated");
+    } catch (error) {
+      state.schedule = previousSchedule;
+      renderTimetable(); renderOverview();
+      setCloudStatus(error.message || "Could not update the student's timetable.");
+    }
   }
   async function syncLog(log) {
     if (!isStudentAccount()) return;
@@ -382,24 +416,26 @@
       saved = loadState();
       importingFirstLocalUse = true;
     }
-    state = saved || { ...defaultState, name: accountProfile.display_name || "Student", schedule: Array.isArray(accountProfile.timetable) && accountProfile.timetable.length ? accountProfile.timetable : LEWI_TIMETABLE, logs: [], activeTimer: null };
+    const serverTimetable = Array.isArray(accountProfile.timetable) ? accountProfile.timetable : [];
+    state = saved || { ...defaultState, name: accountProfile.display_name || "Student", schedule: serverTimetable, logs: [], activeTimer: null };
     state.name = accountProfile.display_name || state.name || "Student";
-    if (Array.isArray(accountProfile.timetable) && accountProfile.timetable.length) state.schedule = accountProfile.timetable;
+    state.schedule = serverTimetable;
     setCloudStatus("Syncing this student's timetable and study logs…");
     try {
-      const profileSynced = await syncProfile();
       await uploadStudentLogs(state.logs);
       if (importingFirstLocalUse) localStorage.setItem(LOCAL_MIGRATION_KEY, authUser.id);
       state.logs = await fetchStudentLogs(authUser.id);
       saveState();
-      setCloudStatus(profileSynced === false ? "Logs synced. Check timetable sync." : "Study logs and timetable are synced.");
+      setCloudStatus("Study logs and timetable are synced.");
     } catch (error) {
       saveState();
       setCloudStatus("Could not reach the cloud. Your local study data is saved and will retry next sign-in.");
     }
   }
   async function loadParentStudents() {
-    const { data: links, error: linksError } = await supabaseClient.from("study_access").select("student_id").eq("parent_id", authUser.id);
+    let linksQuery = supabaseClient.from("study_access").select("student_id");
+    if (!isAdminAccount()) linksQuery = linksQuery.eq("parent_id", authUser.id);
+    const { data: links, error: linksError } = await linksQuery;
     if (linksError) throw linksError;
     const ids = (links || []).map((link) => link.student_id);
     if (!ids.length) {
@@ -467,12 +503,9 @@
         const displayName = $("accountName").value.trim();
         if (!displayName) { $("accountError").textContent = "Add your name to create an account."; return; }
         const accountType = $("accountType").value;
-        const selectedTimetable = $("signupTimetable").value;
-        if (accountType === "student" && !selectedTimetable) { $("accountError").textContent = "Choose the timetable for this student."; return; }
-        const initialTimetable = accountType === "student" ? (selectedTimetable === "ann" ? ANN_TIMETABLE : LEWI_TIMETABLE) : [];
         const { data, error } = await supabaseClient.auth.signUp({
           email, password,
-          options: { data: { display_name: displayName, account_type: accountType, timetable: initialTimetable }, emailRedirectTo: `${window.location.origin}${window.location.pathname}` },
+          options: { data: { display_name: displayName, account_type: accountType }, emailRedirectTo: `${window.location.origin}${window.location.pathname}` },
         });
         if (error) throw error;
         if (data.session) { await handleAuthSession(data.session); $("accountDialog").close(); showToast("Studywell account created"); }
@@ -510,11 +543,11 @@
 
   document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.view)));
   document.querySelectorAll("[data-go]").forEach((item) => item.addEventListener("click", () => navigate(item.dataset.go)));
-  $("quickLogBtn").addEventListener("click", () => openLogDialog()); $("historyLogBtn").addEventListener("click", () => openLogDialog()); $("addSessionBtn").addEventListener("click", () => { if (!isParentView()) openSessionDialog(); });
+  $("quickLogBtn").addEventListener("click", () => openLogDialog()); $("historyLogBtn").addEventListener("click", () => openLogDialog()); $("addSessionBtn").addEventListener("click", () => { if (canEditTimetable()) openSessionDialog(); });
   $("syncAccountBtn").addEventListener("click", openAccountDialog);
   document.querySelectorAll(".auth-mode").forEach((button) => button.addEventListener("click", () => setAccountMode(button.dataset.mode)));
-  $("accountType").addEventListener("change", updateSignupTimetableVisibility);
   $("accountSubmit").addEventListener("click", () => void submitAccountForm());
+  $("applyTimetablePresetBtn").addEventListener("click", () => void applyTimetablePreset());
   $("createInviteBtn").addEventListener("click", () => void createInviteCode());
   $("refreshStudentsBtn").addEventListener("click", () => void refreshParentStudents());
   $("copyInviteBtn").addEventListener("click", async () => {
@@ -533,12 +566,23 @@
   });
   $("accountDialog").addEventListener("click", (event) => { if (event.target === $("accountDialog") || event.target.closest("[data-close-account]")) $("accountDialog").close(); });
   document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => $(button.dataset.closeDialog).close()));
-  window.addEventListener("online", () => { if (isStudentAccount()) { void syncProfile(); void uploadStudentLogs(state.logs).catch(() => setCloudStatus("Offline changes are saved; cloud sync will retry.")); } });
-  $("scheduleList").addEventListener("click", (event) => {
-    const add = event.target.closest(".add-day-session"); if (add && !isParentView()) return openSessionDialog(null, Number(add.dataset.day));
-    if (event.target.closest("#emptyAddBtn") && !isParentView()) return openSessionDialog();
-    const edit = event.target.closest(".edit-session"); if (edit && !isParentView()) return openSessionDialog(state.schedule.find((item) => item.id === edit.dataset.id));
-    const del = event.target.closest(".delete-session"); if (del && !isParentView()) { const session = state.schedule.find((item) => item.id === del.dataset.id); state.schedule = state.schedule.filter((item) => item.id !== del.dataset.id); saveState(); renderTimetable(); renderOverview(); if (isStudentAccount()) void syncProfile(); showToast(`${session?.subject || "Session"} removed`); }
+  window.addEventListener("online", () => { if (isStudentAccount()) void uploadStudentLogs(state.logs).catch(() => setCloudStatus("Offline changes are saved; cloud sync will retry.")); });
+  $("scheduleList").addEventListener("click", async (event) => {
+    const add = event.target.closest(".add-day-session"); if (add && canEditTimetable()) return openSessionDialog(null, Number(add.dataset.day));
+    if (event.target.closest("#emptyAddBtn") && canEditTimetable()) return openSessionDialog();
+    const edit = event.target.closest(".edit-session"); if (edit && canEditTimetable()) return openSessionDialog(state.schedule.find((item) => item.id === edit.dataset.id));
+    const del = event.target.closest(".delete-session");
+    if (del && canEditTimetable()) {
+      const previousSchedule = state.schedule;
+      const session = state.schedule.find((item) => item.id === del.dataset.id);
+      state.schedule = state.schedule.filter((item) => item.id !== del.dataset.id);
+      renderTimetable(); renderOverview();
+      if (isAdminAccount()) {
+        try { await syncSelectedStudentTimetable(); }
+        catch (error) { state.schedule = previousSchedule; renderTimetable(); renderOverview(); setCloudStatus(error.message || "Could not update the student's timetable."); return; }
+      } else saveState();
+      showToast(`${session?.subject || "Session"} removed`);
+    }
   });
   $("todaySessions").addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]"); if (!button) return;
@@ -549,21 +593,27 @@
     if (isDue(session, todayISO())) return openLogDialog({ session });
     startTimer(session);
   });
-  $("sessionForm").addEventListener("submit", (event) => {
+  $("sessionForm").addEventListener("submit", async (event) => {
     if (event.submitter?.value === "cancel") return;
     event.preventDefault();
     const start = $("startInput").value, end = $("endInput").value;
     if (end <= start) { $("sessionError").textContent = "End time needs to be later than start time."; return; }
-    if (isParentView()) { $("sessionError").textContent = "Parent accounts cannot edit a student timetable."; return; }
+    if (!canEditTimetable()) { $("sessionError").textContent = isStudentAccount() ? "The admin manages student timetables." : "Only the admin can edit a linked student's timetable."; return; }
     const id = $("sessionId").value; const session = { id: id || uid(), day: Number($("dayInput").value), start, end, subject: $("subjectInput").value.trim(), focus: $("focusInput").value.trim() };
+    const previousSchedule = state.schedule;
     if (id) state.schedule = state.schedule.map((item) => item.id === id ? session : item); else state.schedule.push(session);
-    saveState(); $("sessionDialog").close(); renderTimetable(); renderOverview(); if (isStudentAccount()) void syncProfile(); showToast(id ? "Timetable updated" : "Session added to timetable");
+    renderTimetable(); renderOverview();
+    if (isAdminAccount()) {
+      try { await syncSelectedStudentTimetable(); }
+      catch (error) { state.schedule = previousSchedule; renderTimetable(); renderOverview(); $("sessionError").textContent = error.message || "Could not save the timetable."; return; }
+    } else saveState();
+    $("sessionDialog").close(); showToast(id ? "Timetable updated" : "Session added to timetable");
   });
   $("logForm").addEventListener("submit", (event) => { if (event.submitter?.value === "cancel") return; event.preventDefault(); saveLog(); });
   $("statusInput").addEventListener("change", updateLogStatusFields);
   $("logSearch").addEventListener("input", renderHistory);
   $("editNameBtn").addEventListener("click", () => { $("nameInput").value = state.name === "Student" ? "" : state.name; $("nameDialog").showModal(); $("nameInput").focus(); });
-  $("nameForm").addEventListener("submit", (event) => { if (event.submitter?.value === "cancel") return; event.preventDefault(); state.name = $("nameInput").value.trim() || "Student"; saveState(); if (isStudentAccount()) { accountProfile.display_name = state.name; void syncProfile(); } $("nameDialog").close(); renderOverview(); showToast("Profile name updated"); });
+  $("nameForm").addEventListener("submit", (event) => { if (event.submitter?.value === "cancel") return; event.preventDefault(); state.name = $("nameInput").value.trim() || "Student"; saveState(); if (isStudentAccount()) void syncStudentDisplayName(); $("nameDialog").close(); renderOverview(); showToast("Profile name updated"); });
   ["sessionDialog", "logDialog", "nameDialog"].forEach((id) => $(id).addEventListener("click", (event) => { if (event.target === $(id)) $(id).close(); }));
   document.addEventListener("click", (event) => { const go = event.target.closest("[data-go]"); if (go && go.closest(".page-view")) navigate(go.dataset.go); });
   if (state.activeTimer) { timerInterval = setInterval(() => { updateTimerText(); renderToday(); }, 1000); }
