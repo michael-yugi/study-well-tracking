@@ -2,6 +2,7 @@
 -- Run this in the Supabase SQL Editor as the project owner.
 -- Public sign-up can create Parent or Student accounts only. Assign Admin manually
 -- to the intended owner account after that account has signed up; example at bottom.
+-- Parent accounts link students; Admin accounts oversee linked students and timetables.
 
 create table if not exists public.study_profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -151,7 +152,7 @@ declare
 begin
   if v_user is null then raise exception 'Sign in first'; end if;
   select account_type into v_type from public.study_profiles where id = v_user;
-  if v_type not in ('parent', 'admin') then raise exception 'Only a parent or admin account can create a link code'; end if;
+  if v_type is distinct from 'parent' then raise exception 'Only a parent account can create a student link code'; end if;
 
   v_code := pg_catalog.upper(pg_catalog.replace(pg_catalog.gen_random_uuid()::text, '-', ''));
   insert into public.study_invites (parent_id, code, expires_at)

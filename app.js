@@ -168,8 +168,8 @@
     const container = $("scheduleList");
     if (!state.schedule.length) {
       const noStudent = isParentView() && !selectedStudentId;
-      const heading = noStudent ? "Link a student first" : isParentView() ? "No timetable available yet" : "Start with the plan you have";
-      const copy = noStudent ? "Link a student account, then select the student to view their timetable." : isParentView() ? (isAdminAccount() ? "This student does not have a timetable yet. Add their study sessions here." : "This student does not have a timetable yet. Ask the admin to add their study sessions.") : isStudentAccount() ? "Your admin manages this timetable. Use your student account to log what you study." : "Add a few study blocks from your real timetable. When the time comes, start a focus timer and record what you covered.";
+      const heading = noStudent ? "No linked students yet" : isParentView() ? "No timetable available yet" : "Start with the plan you have";
+      const copy = noStudent ? (isAdminAccount() ? "A Parent account needs to link a student first. Then choose that student from the menu at the top of the page." : "Create a student link code, then select the linked student to view their timetable.") : isParentView() ? (isAdminAccount() ? "This student does not have a timetable yet. Add their study sessions here." : "This student does not have a timetable yet. Ask the admin to add their study sessions.") : isStudentAccount() ? "Your admin manages this timetable. Use your student account to log what you study." : "Add a few study blocks from your real timetable. When the time comes, start a focus timer and record what you covered.";
       container.innerHTML = `<div class="empty-timetable"><span class="empty-plan-icon">▦</span><h3>${heading}</h3><p>${copy}</p>${canEditTimetable() ? `<button class="button button-dark" id="emptyAddBtn"><span class="button-plus">+</span> Add the first session</button>` : ""}</div>`; return;
     }
     container.innerHTML = Array.from({ length: 7 }, (_, index) => (index + 1) % 7).map((day) => {
@@ -281,6 +281,7 @@
   }
 
   function isStudentAccount() { return Boolean(authUser && accountProfile?.account_type === "student"); }
+  function isParentAccount() { return Boolean(authUser && accountProfile?.account_type === "parent"); }
   function isAdminAccount() { return Boolean(authUser && accountProfile?.account_type === "admin"); }
   function isParentView() { return Boolean(authUser && ["parent", "admin"].includes(accountProfile?.account_type)); }
   function canEditTimetable() { return isAdminAccount() ? Boolean(selectedStudentId) : !authUser; }
@@ -322,10 +323,8 @@
     if (authUser) {
       $("accountDialogTitle").textContent = isAdminAccount() ? "Admin tools" : isParentView() ? "Parent account" : "Cloud sync";
       $("signedInSummary").textContent = `${accountProfile?.display_name || authUser.email} · ${isAdminAccount() ? "Admin" : isParentView() ? "Parent" : "Student"}`;
-      $("parentTools").hidden = !isParentView(); $("studentTools").hidden = !isStudentAccount();
-      $("parentToolsIntro").textContent = isAdminAccount()
-        ? "Create a one-time code for a student, view every linked student, and manage their timetables. Study logs remain read-only."
-        : "Create a one-time code for each student. You can view linked students’ timetables and study logs; the admin manages schedules.";
+      $("parentTools").hidden = !isParentAccount(); $("adminTools").hidden = !isAdminAccount(); $("studentTools").hidden = !isStudentAccount();
+      $("parentToolsIntro").textContent = "Create a one-time code for each student. You can view linked students’ timetables and study logs; the admin manages schedules.";
       $("createInviteBtn").textContent = linkedStudents.length ? "Create another student code" : "Create student link code";
       renderLinkedStudentsList();
     } else setAccountMode("signin");
@@ -440,7 +439,7 @@
     const ids = (links || []).map((link) => link.student_id);
     if (!ids.length) {
       linkedStudents = []; selectedStudentId = null;
-      state = { ...defaultState, name: accountProfile.display_name || "Parent", schedule: [], logs: [], activeTimer: null };
+      state = { ...defaultState, name: accountProfile.display_name || (isAdminAccount() ? "Admin" : "Parent"), schedule: [], logs: [], activeTimer: null };
       return;
     }
     const { data: profiles, error: profileError } = await supabaseClient.from("study_profiles").select("id,display_name,timetable").in("id", ids);
@@ -459,13 +458,13 @@
   }
   async function refreshParentStudents() {
     if (!isParentView()) return;
-    $("refreshStudentsBtn").disabled = true; $("linkError").textContent = "";
+    ["refreshStudentsBtn", "refreshAdminStudentsBtn"].forEach((id) => { $(id).disabled = true; }); $("linkError").textContent = "";
     try {
       await loadParentStudents(); renderCloudControls(); renderLinkedStudentsList(); renderOverview();
       if ($("historyView").classList.contains("active")) renderHistory();
       $("linkError").textContent = linkedStudents.length ? "Student list refreshed." : "No students linked yet. Create a separate code for each student.";
     } catch (error) { $("linkError").textContent = error.message || "Could not refresh the student list."; }
-    finally { $("refreshStudentsBtn").disabled = false; }
+    finally { ["refreshStudentsBtn", "refreshAdminStudentsBtn"].forEach((id) => { $(id).disabled = false; }); }
   }
   async function handleAuthSession(session) {
     if (!session) {
@@ -550,6 +549,7 @@
   $("applyTimetablePresetBtn").addEventListener("click", () => void applyTimetablePreset());
   $("createInviteBtn").addEventListener("click", () => void createInviteCode());
   $("refreshStudentsBtn").addEventListener("click", () => void refreshParentStudents());
+  $("refreshAdminStudentsBtn").addEventListener("click", () => void refreshParentStudents());
   $("copyInviteBtn").addEventListener("click", async () => {
     try { await navigator.clipboard.writeText($("inviteCodeText").textContent); showToast("Link code copied"); }
     catch (_) { $("linkError").textContent = "Copy was unavailable. Select and copy the code above."; }
