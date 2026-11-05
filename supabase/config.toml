@@ -1,0 +1,2 @@
+[functions.studywell-push]
+verify_jwt = false

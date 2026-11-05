@@ -1,37 +1,63 @@
 # Studywell
 
-Repository: `study-well-tracking`
+A timetable-based study tracker for students, parents/guardians, and an admin. The live site is hosted on GitHub Pages and uses Supabase for accounts and shared progress.
 
-A small, browser based study tracker for following a personal timetable and remembering what each session covered.
+## Roles and sharing
 
-## Open it
+- **Admin:** views linked students and manages their timetables and weekly goals.
+- **Parent / guardian:** creates a one-time code for each student and views linked students’ timetables, logs, weekly progress, and make-up requests.
+- **Student:** signs in to start lesson timers, add learning reflections, set a weekly goal, and request make-up time.
+- A student can link several caregivers. Each caregiver creates a separate code, and the student redeems each code from the same Student account.
+- Ann and Lewi have independent student accounts. The admin selects each student separately and applies the correct timetable preset.
 
-Open `index.html` in a modern browser. No install or account is needed.
+## Lesson timers and automatic results
 
-## Use it
+- A student starts a timer during the scheduled lesson. The server records the start, pauses, resume, and finish actions.
+- Focused minutes come from the timer; the scheduled session’s time and result fields are locked against manual editing.
+- The timer stops at the timetable end. A full session is **Completed** when focused time is within one minute of the planned duration; any positive shorter time is **Partly completed**; no focused time is **Missed**.
+- A background Supabase Cron job finalizes timers and adds a missed record when a scheduled lesson ends without a timer. It runs even if Studywell is closed.
+- After the result is recorded, the student can add the topic and learning reflections. Until then a timed log says **Details not added yet**.
+- Independent study entries that are not attached to a timetable block can still use manually entered minutes and a selected result.
 
-1. The weekday lessons from the supplied timetable are preloaded. The six study periods are included; breakfast, break, and lunch are left out. Saturday revision is set to 8:00–11:00.
-2. On the day, start a focus timer when a planned session begins. For a past or missed session, choose **Log session**.
-3. Save the subject, topic, actual minutes, and whether the session was completed, partly completed, or missed.
-4. Use **Study log** to search and review what was studied over time.
+## Goals, streaks, and missed-session requests
 
-The overview compares completed sessions against timetable blocks whose end time has passed this week. Focus time comes from saved logs. A timer is a self-reported aid, not independent proof that someone studied.
+- New students start with a weekly goal of **300 minutes (5 hours)**. The student or admin can change it; parents can view it.
+- A streak counts consecutive calendar days with recorded focused study time.
+- From a missed session in the Study log, the student can request a make-up date and time and explain why they missed it. The admin can approve or decline.
 
-## Parent and student sync
+## Database setup
 
-Cloud sync uses Supabase. The browser contains only the project's publishable key; table access is restricted with row-level security. Never put a Supabase secret or service-role key in this repository.
+Run the current `supabase-setup.sql` in the project’s Supabase SQL Editor. It is safe to rerun and keeps existing profiles and study logs. It updates the database for multiple guardians, timers, goals, requests, missed-session automation, and reminder scheduling.
 
-1. In the Supabase project, open **SQL Editor**, create a query, paste all of `supabase-setup.sql`, and run it once.
-2. In **Authentication → URL Configuration**, add `https://michael-yugi.github.io/study-well-tracking/` to the redirect URL allow list.
-3. Open the tracker and create a **Parent / teacher** account. Sign in and choose **Create student link code**.
-4. Have each student open the same tracker, create a separate **Student** account, choose their starting timetable, and enter their own one-time code from the parent.
-5. Choose **Ann's timetable** or **Lewi's timetable** at signup. Each student's schedule and study log belong to that student's account; students can edit their timetable later. Parents can create another link code for every additional student, refresh the linked-student list, and select a student from the top bar.
-6. Study logs and timetables sync from each student account. The parent signs in to view linked students and their records.
+The script tries to enable Supabase Cron and schedule these jobs:
 
-After a lesson, students can record the topic, explain what it covers, summarize what they learned, mark topic progress, and note what they did not understand. These reflections are searchable in the study log and sync with the rest of the student's record.
+- `studywell-mark-missed-lessons` — finalizes timers and records missed lessons each minute.
+- `studywell-queue-reminders` — creates before-lesson and follow-up reminder events each minute.
 
-If the original Supabase setup SQL was already run, run the current `supabase-setup.sql` again to add the reflection fields to the existing table. It keeps existing study logs.
+Check **Integrations → Cron** in Supabase to confirm both jobs appear. If Cron is not enabled on the project, enable the Cron extension there and run these two statements in SQL Editor:
 
-Each person should use their own account; do not share passwords. Link codes expire after 24 hours and can be used once. Parents can view records but cannot edit the student's timetable or logs. If a browser is offline, its local copy remains available and sync retries when the connection returns.
+```sql
+select cron.schedule('studywell-mark-missed-lessons', '* * * * *',
+  'select public.finalize_and_mark_missed_study_sessions()');
+select cron.schedule('studywell-queue-reminders', '* * * * *',
+  'select public.enqueue_study_reminders()');
+```
 
-Without signing in, the tracker continues to store data only in that browser's local storage.
+To assign the admin role after the admin has signed up, use the final commented SQL example in `supabase-setup.sql`, replacing the placeholder with the admin email. For Michael’s admin account, the address is `michaelyugi598@gmail.com`.
+
+## Enable reminders when Studywell is closed
+
+The existing browser reminders work while the site is open. Closed-site reminders use Web Push and need a one-time setup in Supabase and the repository:
+
+1. Generate a VAPID key pair with `npx web-push generate-vapid-keys`. Keep the private key out of GitHub.
+2. Put the **public** key in `supabase-config.js` as `pushPublicKey` and publish that small config change to GitHub Pages.
+3. Install/link the Supabase CLI, then save the private VAPID key and these values as Edge Function secrets: `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT` (for example `mailto:michaelyugi598@gmail.com`), and a long random `STUDYWELL_WEBHOOK_SECRET`. Supabase provides `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to the function.
+4. Deploy `supabase/functions/studywell-push` with JWT verification disabled; the function checks the webhook secret itself. For example: `npx supabase functions deploy studywell-push --project-ref iksxkdcamgeidwppgeef --no-verify-jwt`.
+5. In **Database → Webhooks**, create an INSERT webhook for `study_reminder_queue` that calls the `studywell-push` Edge Function. Add Supabase’s Edge Function secret key header and a custom `x-studywell-webhook-secret` header with the same value saved in step 3.
+6. Each student signs in on each device, chooses **Enable study reminders**, and allows notifications. Supported browsers can then receive lesson reminders even with Studywell closed.
+
+Do not commit VAPID private keys, Supabase secret keys, or webhook secrets. The publishable Supabase key in `supabase-config.js` is intended to be public; table access is restricted by row-level security.
+
+## Local use
+
+Open `index.html` in a modern browser. Without signing in, data stays in that browser. Closed-site automatic missed records and shared accounts require the hosted Supabase setup.

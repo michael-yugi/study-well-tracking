@@ -47,13 +47,17 @@
   }
   const LEWI_TIMETABLE = buildTimetable(WEEKDAY_ROWS, "lewi");
   const ANN_TIMETABLE = buildTimetable(ANN_WEEKDAY_ROWS, "ann");
-  const defaultState = { name: "Student", schedule: LEWI_TIMETABLE, logs: [], activeTimer: null, timetableImported: true };
+  const defaultState = { name: "Student", schedule: LEWI_TIMETABLE, logs: [], activeTimer: null, weeklyGoalMinutes: 300, timetableImported: true };
   let authUser = null;
   let accountProfile = null;
   let linkedStudents = [];
   let selectedStudentId = null;
   let logReviews = [];
   let timetableRequests = [];
+  let makeupRequestLog = null;
+  let currentLogTimer = false;
+  let currentLogAutomatic = false;
+  let currentLogTimerSeconds = 0;
   let authMode = "signin";
   let state = loadState();
   let timerInterval = null;
@@ -117,6 +121,17 @@
     const endAt = timerEndAt(timer);
     const boundedNow = endAt ? Math.min(now, endAt) : now;
     return accumulated + Math.max(0, boundedNow - Math.max(runningSince, plannedStartAt));
+  }
+  function sessionResultForSeconds(seconds, plannedSeconds) {
+    if (seconds <= 0) return "missed";
+    return seconds >= Math.max(1, plannedSeconds - 60) ? "completed" : "partial";
+  }
+  async function persistTimerAction(timer, action) {
+    if (!isStudentAccount()) return;
+    const { error } = await supabaseClient.rpc("record_study_timer", {
+      p_session_id: timer.sessionId, p_study_date: timer.date, p_action: action,
+    });
+    if (error) throw error;
   }
   function isDue(session, date) {
     return sessionBoundary(session, date, "end") <= Date.now();
@@ -187,7 +202,7 @@
       else if (isParentView()) { action = `<button class="session-action" disabled>Not logged</button>`; }
       else if (state.activeTimer) { action = `<button class="session-action" disabled title="Finish the active timer first">Waiting</button>`; }
       else if (now < startAt) { action = `<button class="session-action" disabled title="The timer opens at the scheduled start time">Starts ${formatTime(session.start)}</button>`; }
-      else if (now >= endAt) { action = `<button class="session-action missed-action" data-action="start-or-log" data-id="${escapeHTML(session.id)}">Log session</button>`; }
+      else if (now >= endAt) { action = `<button class="session-action missed-action" disabled title="Studywell is recording the automatic session result">Saving result…</button>`; }
       else { action = `<button class="session-action" data-action="start-or-log" data-id="${escapeHTML(session.id)}">Start timer</button>`; }
       const focus = log ? log.topic : session.focus || "Planned study time";
       return `<div class="session-row ${statusClass}"><span class="session-time">${formatTime(session.start)}<br>${formatTime(session.end)}</span><span class="session-line"></span><span class="session-info"><strong class="session-subject">${escapeHTML(session.subject)}</strong><span class="session-focus">${escapeHTML(focus)}</span></span>${action}</div>`;
@@ -237,17 +252,58 @@
       topics, needsHelp,
     };
   }
+  function currentWeeklyGoal() {
+    if (isStudentAccount()) return Number(accountProfile?.weekly_goal_minutes) || 300;
+    if (isParentView()) return Number(linkedStudents.find((student) => student.id === selectedStudentId)?.weekly_goal_minutes) || 300;
+    return Number(state.weeklyGoalMinutes) || 300;
+  }
+  function studyStreakDays() {
+    const studyDates = new Set(state.logs.filter((log) => Number(log.minutes) > 0).map((log) => log.date));
+    const cursor = new Date(); cursor.setHours(0, 0, 0, 0);
+    if (!studyDates.has(toISO(cursor))) cursor.setDate(cursor.getDate() - 1);
+    let streak = 0;
+    while (studyDates.has(toISO(cursor))) { streak += 1; cursor.setDate(cursor.getDate() - 1); }
+    return streak;
+  }
   function renderWeeklySummary() {
     const summary = weeklySummaryData();
+    const goalMinutes = currentWeeklyGoal(); const goalPercent = Math.min(100, Math.round(summary.minutes / goalMinutes * 100));
+    const streak = studyStreakDays();
     $("weeklySummaryTitle").textContent = isParentView() ? `${state.name || "Student"}'s progress this week` : "Your progress this week";
     $("weeklySummaryStats").innerHTML = [
       ["Planned", `${summary.plans.length}`, "sessions this week"],
       ["Logged", `${summary.loggedPlans.length} / ${summary.duePlans.length}`, "sessions due so far"],
       ["Focused time", durationLabel(summary.minutes), "total this week"],
       ["Needs help", `${summary.needsHelp.length}`, "topics to review"],
+      ["Streak", `${streak} day${streak === 1 ? "" : "s"}`, streak ? "in a row with study time" : "start a study streak"],
     ].map(([label, value, caption]) => `<div class="summary-stat"><span>${label}</span><strong>${value}</strong><small>${caption}</small></div>`).join("");
+    $("weeklyGoalValue").textContent = `${durationLabel(summary.minutes)} of ${durationLabel(goalMinutes)}`;
+    $("weeklyGoalBar").style.width = `${goalPercent}%`;
+    $("weeklyGoalNote").textContent = goalPercent >= 100 ? "Weekly goal reached — well done!" : `${goalPercent}% of this week's goal · ${durationLabel(Math.max(0, goalMinutes - summary.minutes))} to go`;
+    $("weeklyGoalControls").hidden = !(isStudentAccount() || isAdminAccount() && Boolean(selectedStudentId));
+    $("weeklyGoalInput").value = String(Math.round(goalMinutes / 60 * 10) / 10);
     const topicText = summary.topics.length ? `Topics covered: ${summary.topics.slice(0, 4).join(" · ")}${summary.topics.length > 4 ? ` · +${summary.topics.length - 4} more` : ""}. ` : "No topics logged this week yet. ";
     $("weeklySummaryNote").textContent = `${topicText}${summary.completed} completed · ${summary.partial} partial · ${summary.missed} missed · ${summary.unlogged} due session${summary.unlogged === 1 ? "" : "s"} not logged.`;
+  }
+  async function saveWeeklyGoal() {
+    const hours = Number($("weeklyGoalInput").value);
+    const minutes = Math.round(hours * 60);
+    if (!Number.isFinite(hours) || minutes < 30 || minutes > 3000) { showToast("Choose a goal from 0.5 to 50 hours"); return; }
+    if (!isStudentAccount() && !isAdminAccount()) return;
+    const studentId = isStudentAccount() ? authUser.id : selectedStudentId;
+    if (!studentId) return;
+    const button = $("saveWeeklyGoalBtn"); button.disabled = true;
+    try {
+      const { error } = await supabaseClient.rpc("update_my_weekly_goal", { p_student_id: studentId, p_weekly_goal_minutes: minutes });
+      if (error) throw error;
+      if (isStudentAccount()) accountProfile.weekly_goal_minutes = minutes;
+      else {
+        const student = linkedStudents.find((item) => item.id === studentId);
+        if (student) student.weekly_goal_minutes = minutes;
+      }
+      state.weeklyGoalMinutes = minutes; renderWeeklySummary(); showToast("Weekly study goal updated");
+    } catch (error) { showToast(error.message || "Could not save the weekly goal. Run the latest Supabase setup SQL."); }
+    finally { button.disabled = false; }
   }
   function printStudyReport() {
     const range = $("reportRange").value; const today = new Date();
@@ -306,27 +362,46 @@
     panel.hidden = !visible; $("requestTimetableChangeBtn").hidden = !isStudentAccount();
     if (!visible) return;
     const list = $("timetableRequestList");
-    if (!timetableRequests.length) { list.innerHTML = `<p class="empty-requests">${isAdminAccount() ? "No timetable change requests for this student." : isStudentAccount() ? "You have not sent a timetable change request." : "No timetable change requests for this student."}</p>`; return; }
+    if (!timetableRequests.length) { list.innerHTML = `<p class="empty-requests">${isStudentAccount() ? "You have not sent any requests." : "There are no requests for this student."}</p>`; return; }
     list.innerHTML = timetableRequests.map((request) => {
       const statusLabel = request.status === "approved" ? "Approved" : request.status === "declined" ? "Declined" : "Pending";
       const adminActions = isAdminAccount() && request.status === "pending" ? `<div class="request-actions"><button class="button button-quiet" data-request-status="approved" data-request-id="${escapeHTML(request.id)}">Approve</button><button class="button button-quiet" data-request-status="declined" data-request-id="${escapeHTML(request.id)}">Decline</button></div>` : "";
-      return `<article class="request-card"><div class="request-card-heading"><strong>${statusLabel}</strong><small>${formatDate(new Date(request.created_at), { month: "short", day: "numeric" })}</small></div><p>${escapeHTML(request.request_text)}</p>${request.admin_response ? `<small>Admin response: ${escapeHTML(request.admin_response)}</small>` : ""}${request.status === "approved" && isStudentAccount() ? `<small>The admin will update your timetable.</small>` : ""}${adminActions}</article>`;
+      const kindLabel = request.request_type === "makeup" ? "Make-up lesson" : "Timetable change";
+      const makeupAt = request.makeup_date ? `${formatDate(fromISO(request.makeup_date), { weekday: "short", month: "short", day: "numeric" })}${request.makeup_start ? ` · ${formatTime(request.makeup_start)}${request.makeup_end ? `–${formatTime(request.makeup_end)}` : ""}` : ""}` : "";
+      return `<article class="request-card"><div class="request-card-heading"><strong>${kindLabel} · ${statusLabel}</strong><small>${formatDate(new Date(request.created_at), { month: "short", day: "numeric" })}</small></div>${makeupAt ? `<small>Proposed make-up: ${escapeHTML(makeupAt)}</small>` : ""}<p>${escapeHTML(request.request_text)}</p>${request.admin_response ? `<small>Admin response: ${escapeHTML(request.admin_response)}</small>` : ""}${request.status === "approved" && isStudentAccount() && request.request_type !== "makeup" ? `<small>The admin will update your timetable.</small>` : ""}${adminActions}</article>`;
     }).join("");
   }
-  function openTimetableRequestDialog() {
+  function openTimetableRequestDialog(log = null) {
     if (!isStudentAccount()) return;
-    $("timetableRequestForm").reset(); $("timetableRequestError").textContent = ""; $("timetableRequestDialog").showModal();
+    makeupRequestLog = log;
+    $("timetableRequestForm").reset(); $("timetableRequestError").textContent = "";
+    $("makeupFields").hidden = !log;
+    $("timetableRequestDialogTitle").textContent = log ? "Request a make-up lesson" : "Request a timetable change";
+    $("timetableRequestReasonLabel").textContent = log ? "Why was the lesson missed?" : "What change would help?";
+    $("timetableRequestInput").placeholder = log ? "For example, I had a family commitment. Could I make up this lesson tomorrow?" : "For example, move Maths revision to Saturday afternoon because of football practice.";
+    const makeupDate = new Date(); makeupDate.setDate(makeupDate.getDate() + 1);
+    $("makeupDateInput").value = toISO(makeupDate); $("makeupDateInput").min = todayISO();
+    $("makeupStartInput").value = log?.plannedStart || "16:00"; $("makeupEndInput").value = log?.plannedEnd || "17:00";
+    $("timetableRequestDialog").showModal();
   }
   async function submitTimetableChangeRequest(event) {
     event.preventDefault();
     if (!isStudentAccount()) return;
     const requestText = $("timetableRequestInput").value.trim();
     if (!requestText) { $("timetableRequestError").textContent = "Describe the timetable change you would like."; return; }
+    const makeup = Boolean(makeupRequestLog);
+    const makeupDate = $("makeupDateInput").value; const makeupStart = $("makeupStartInput").value; const makeupEnd = $("makeupEndInput").value;
+    if (makeup && (!makeupDate || !makeupStart || !makeupEnd || makeupEnd <= makeupStart)) { $("timetableRequestError").textContent = "Choose a valid make-up date and a finishing time after the start time."; return; }
     $("submitTimetableRequestBtn").disabled = true; $("timetableRequestError").textContent = "";
     try {
-      const { error } = await supabaseClient.from("study_timetable_requests").insert({ student_id: authUser.id, request_text: requestText });
+      const { error } = await supabaseClient.from("study_timetable_requests").insert({
+        student_id: authUser.id, request_type: makeup ? "makeup" : "timetable_change", request_text: requestText,
+        missed_study_date: makeup ? makeupRequestLog.date : null, missed_session_id: makeup ? makeupRequestLog.sessionId : null,
+        makeup_date: makeup ? makeupDate : null, makeup_start: makeup ? makeupStart : null, makeup_end: makeup ? makeupEnd : null,
+      });
       if (error) throw error;
-      timetableRequests = await fetchTimetableRequests(authUser.id); $("timetableRequestDialog").close(); renderTimetableRequests(); showToast("Change request sent to the admin");
+      timetableRequests = await fetchTimetableRequests(authUser.id); $("timetableRequestDialog").close(); renderTimetableRequests();
+      makeupRequestLog = null; showToast(makeup ? "Make-up request sent to the admin" : "Timetable change request sent");
     } catch (error) { $("timetableRequestError").textContent = error.message || "Could not send the request. Run the latest Supabase setup SQL."; }
     finally { $("submitTimetableRequestBtn").disabled = false; }
   }
@@ -336,7 +411,8 @@
       const { error } = await supabaseClient.rpc("review_study_timetable_request", { p_request_id: requestId, p_status: status, p_response: "" });
       if (error) throw error;
       timetableRequests = await fetchTimetableRequests(selectedStudentId); renderTimetableRequests();
-      showToast(status === "approved" ? "Request approved; update the timetable when ready" : "Request declined");
+      const request = timetableRequests.find((item) => item.id === requestId);
+      showToast(status === "approved" ? request?.request_type === "makeup" ? "Make-up request approved" : "Timetable request approved" : "Request declined");
     } catch (error) { setCloudStatus(error.message || "Could not update the timetable request. Run the latest Supabase setup SQL."); }
   }
   function renderHistory() {
@@ -348,12 +424,13 @@
     $("historyList").innerHTML = logs.map((log) => {
       const plannedMinutes = log.plannedStart && log.plannedEnd ? minutesFromTime(log.plannedEnd) - minutesFromTime(log.plannedStart) : 0;
       const durationSummary = `${durationLabel(log.minutes)} focused${plannedMinutes > 0 ? ` · ${durationLabel(plannedMinutes)} planned` : ""}`;
-      const reflections = [
+    const reflections = [
         reflectionMarkup("What this topic is about", log.topicAbout),
         reflectionMarkup("What I learned", log.whatLearned),
         reflectionMarkup("What I didn’t understand properly", log.notUnderstood),
       ].join("");
-      return `<article class="history-card"><div class="history-card-top"><div class="history-subject"><div class="subject-badge color-${(log.subject.charCodeAt(0) || 0) % 4}">${escapeHTML(log.subject.trim().charAt(0).toUpperCase())}</div><div><strong>${escapeHTML(log.subject)}</strong><span>${formatDate(fromISO(log.date), { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div></div><span class="duration-pill">${durationSummary}</span></div><div class="history-topic">${escapeHTML(log.topic)}</div>${reflections ? `<div class="history-reflections">${reflections}</div>` : ""}${log.notes ? `<div class="history-notes"><strong>Next step or other notes</strong><p>${escapeHTML(log.notes)}</p></div>` : ""}${renderLogReviews(log)}<div class="history-foot"><span>${log.plannedStart ? `Planned ${formatTime(log.plannedStart)}${log.plannedEnd ? `–${formatTime(log.plannedEnd)}` : ""}` : "Independent study"}</span><span class="topic-progress-pill">${topicProgressLabel(log.topicProgress)}</span><span class="status-pill ${log.status === "partial" ? "partial" : ""}">${log.status === "partial" ? "Partly completed" : log.status === "missed" ? "Missed session" : log.sessionId ? "Completed as planned" : "Study logged"}</span></div></article>`;
+      const missedFollowup = isStudentAccount() && log.status === "missed" && log.sessionId ? `<button class="button button-quiet missed-followup-button" data-makeup-log="${escapeHTML(log.id)}">Request a make-up</button>` : "";
+      return `<article class="history-card"><div class="history-card-top"><div class="history-subject"><div class="subject-badge color-${(log.subject.charCodeAt(0) || 0) % 4}">${escapeHTML(log.subject.trim().charAt(0).toUpperCase())}</div><div><strong>${escapeHTML(log.subject)}</strong><span>${formatDate(fromISO(log.date), { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div></div><span class="duration-pill">${durationSummary}</span></div><div class="history-topic">${escapeHTML(log.topic)}</div>${reflections ? `<div class="history-reflections">${reflections}</div>` : ""}${log.notes ? `<div class="history-notes"><strong>Next step or other notes</strong><p>${escapeHTML(log.notes)}</p></div>` : ""}${renderLogReviews(log)}<div class="history-foot"><span>${log.plannedStart ? `Planned ${formatTime(log.plannedStart)}${log.plannedEnd ? `–${formatTime(log.plannedEnd)}` : ""}` : "Independent study"}</span><span class="topic-progress-pill">${topicProgressLabel(log.topicProgress)}</span><span class="status-pill ${log.status === "partial" ? "partial" : ""}">${log.status === "partial" ? "Partly completed" : log.status === "missed" ? "Missed session" : log.sessionId ? "Completed as planned" : "Study logged"}</span>${missedFollowup}</div></article>`;
     }).join("");
   }
   function navigate(view) {
@@ -374,6 +451,9 @@
   }
   function openLogDialog({ session = null, log = null, minutes = null, timer = false } = {}) {
     const readOnly = isParentView();
+    currentLogTimer = Boolean(timer);
+    currentLogAutomatic = Boolean(timer || session?.id || log?.sessionId);
+    currentLogTimerSeconds = timer && state.activeTimer ? Math.max(0, Math.floor(timerElapsedMs(state.activeTimer) / 1000)) : 0;
     $("logForm").reset(); $("logError").textContent = "";
     ["logSubject", "topicInput", "topicAboutInput", "learnedInput", "topicProgressInput", "notUnderstoodInput", "minutesInput", "logDateInput", "notesInput", "statusInput"].forEach((id) => { $(id).disabled = false; });
     $("saveLogBtn").hidden = false;
@@ -385,39 +465,49 @@
     $("topicAboutInput").value = log?.topicAbout || ""; $("learnedInput").value = log?.whatLearned || "";
     $("topicProgressInput").value = log?.topicProgress || (log?.status === "missed" ? "not_started" : "in_progress");
     $("notUnderstoodInput").value = log?.notUnderstood || "";
-    $("minutesInput").value = log ? log.minutes : minutes ?? (session ? Math.max(1, minutesFromTime(session.end) - minutesFromTime(session.start)) : "");
-    $("logDateInput").value = log?.date || todayISO(); $("logDateInput").max = todayISO(); $("notesInput").value = log?.notes || ""; $("statusInput").value = log?.status || "completed";
     const plannedStart = session?.start || log?.plannedStart; const plannedEnd = session?.end || log?.plannedEnd;
     const plannedMinutes = plannedStart && plannedEnd ? minutesFromTime(plannedEnd) - minutesFromTime(plannedStart) : 0;
+    const autoMinutes = timer ? (currentLogTimerSeconds ? Math.max(1, Math.round(currentLogTimerSeconds / 60)) : 0) : minutes;
+    const autoStatus = timer ? sessionResultForSeconds(currentLogTimerSeconds, plannedMinutes * 60) : log?.status || "completed";
+    $("minutesInput").value = log ? log.minutes : autoMinutes ?? (session ? Math.max(1, plannedMinutes) : "");
+    $("logDateInput").value = log?.date || todayISO(); $("logDateInput").max = todayISO(); $("notesInput").value = log?.notes || ""; $("statusInput").value = timer ? autoStatus : log?.status || "completed";
     $("plannedForLabel").textContent = plannedMinutes ? `Planned ${formatTime(plannedStart)}–${formatTime(plannedEnd)} · ${durationLabel(plannedMinutes)} planned` : "Independent study";
     $("timerBanner").hidden = !timer;
     if (timer) $("timerCopy").textContent = state.activeTimer?.autoStoppedAt ? "Stopped at the planned end" : state.activeTimer?.manualStopped ? "Timer finished" : state.activeTimer?.pausedAt ? "Timer paused" : "Focused time";
     $("saveLogBtn").textContent = log ? "Save changes" : "Save study log"; updateLogStatusFields();
-    ["logSubject", "topicInput", "topicAboutInput", "learnedInput", "topicProgressInput", "notUnderstoodInput", "minutesInput", "logDateInput", "notesInput", "statusInput"].forEach((id) => { $(id).disabled = readOnly || (id !== "logSubject" && id !== "logDateInput" && id !== "notesInput" && $("statusInput").value === "missed"); });
+    ["logSubject", "topicInput", "topicAboutInput", "learnedInput", "topicProgressInput", "notUnderstoodInput", "minutesInput", "logDateInput", "notesInput", "statusInput"].forEach((id) => { $(id).disabled = readOnly || (currentLogAutomatic && ["minutesInput", "statusInput", "logDateInput"].includes(id)) || (id !== "logSubject" && id !== "logDateInput" && id !== "notesInput" && $("statusInput").value === "missed"); });
     $("saveLogBtn").hidden = readOnly;
     $("logDialog").showModal(); if (timer) updateTimerText(); if (!readOnly) $("topicInput").focus();
   }
   function formatElapsed() { if (!state.activeTimer) return "00:00"; const sec = Math.max(0, Math.floor(timerElapsedMs() / 1000)); return `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`; }
   function updateTimerText() { $("timerText").textContent = formatElapsed(); }
-  function startTimer(session) {
+  async function startTimer(session) {
     if (isParentView() || state.activeTimer) return;
     const date = todayISO(); const now = Date.now(); const plannedStartAt = sessionBoundary(session, date, "start"); const plannedEndAt = sessionBoundary(session, date, "end");
     if (now < plannedStartAt) return;
-    if (now >= plannedEndAt) { openLogDialog({ session }); return; }
-    state.activeTimer = { sessionId: session.id, date, startedAt: now, runningSince: now, accumulatedMs: 0, plannedStartAt, plannedEndAt, pausedAt: null, autoStoppedAt: null, manualStopped: false };
+    if (now >= plannedEndAt) return;
+    const startingTimer = { sessionId: session.id, date, startedAt: now, runningSince: now, accumulatedMs: 0, plannedStartAt, plannedEndAt, pausedAt: null, autoStoppedAt: null, manualStopped: false };
+    try { await persistTimerAction(startingTimer, "start"); }
+    catch (error) { setCloudStatus(error.message || "Could not start and sync this lesson timer."); showToast("Timer could not sync; check your connection"); return; }
+    const startedAt = Date.now(); startingTimer.startedAt = startedAt; startingTimer.runningSince = startedAt;
+    state.activeTimer = startingTimer;
     saveState(); ensureTimerLoop(); renderOverview(); showToast(`Focus timer started for ${session.subject}`);
   }
-  function pauseTimer(session) {
+  async function pauseTimer(session) {
     const timer = state.activeTimer; if (!timer || timer.pausedAt || timer.autoStoppedAt || timer.manualStopped) return;
     const now = Date.now(); const endAt = timerEndAt(timer, session);
     if (endAt && now >= endAt) return autoStopTimer(session);
+    try { await persistTimerAction(timer, "pause"); }
+    catch (error) { setCloudStatus(error.message || "Could not sync the paused timer."); showToast("Pause did not sync; try again"); return; }
     timer.accumulatedMs = timerElapsedMs(timer, now); timer.runningSince = null; timer.pausedAt = now;
     saveState(); updateTimerText(); renderOverview(); showToast("Timer paused");
   }
-  function resumeTimer(session) {
+  async function resumeTimer(session) {
     const timer = state.activeTimer; if (!timer || !timer.pausedAt || timer.autoStoppedAt || timer.manualStopped) return;
     const now = Date.now(); const endAt = timerEndAt(timer, session);
     if (endAt && now >= endAt) return autoStopTimer(session);
+    try { await persistTimerAction(timer, "resume"); }
+    catch (error) { setCloudStatus(error.message || "Could not sync the resumed timer."); showToast("Resume did not sync; try again"); return; }
     timer.runningSince = now; timer.pausedAt = null;
     saveState(); ensureTimerLoop(); renderOverview(); showToast("Timer resumed");
   }
@@ -441,6 +531,7 @@
     const timer = state.activeTimer; if (!timer || timer.autoStoppedAt || timer.manualStopped) return;
     const endAt = timerEndAt(timer, session); if (!endAt) return;
     const elapsedMs = timerElapsedMs(timer, endAt);
+    void persistTimerAction(timer, "finish").catch(() => setCloudStatus("Timer stopped here; Supabase will finalize the saved timer at the scheduled end."));
     timer.accumulatedMs = elapsedMs; timer.runningSince = null; timer.autoStoppedAt = endAt;
     saveState(); clearInterval(timerInterval); timerInterval = null; renderOverview();
     if (session) {
@@ -448,13 +539,15 @@
       showToast("Timer stopped at the scheduled lesson end");
     }
   }
-  function finishTimer(session) {
+  async function finishTimer(session) {
     const timer = state.activeTimer; if (!timer) return;
     if (timer.autoStoppedAt || timer.manualStopped) {
       openLogDialog({ session, minutes: Math.max(0, Math.round(timerElapsedMs(timer) / 60000)), timer: true }); return;
     }
     const now = Date.now(); const endAt = timerEndAt(timer, session);
     if (endAt && now >= endAt) return autoStopTimer(session);
+    try { await persistTimerAction(timer, "finish"); }
+    catch (error) { setCloudStatus(error.message || "Could not sync the finished timer."); showToast("Finish did not sync; try again"); return; }
     const elapsedMs = timerElapsedMs(timer, now);
     timer.accumulatedMs = elapsedMs; timer.runningSince = null; timer.pausedAt = now; timer.manualStopped = true;
     saveState(); clearInterval(timerInterval); timerInterval = null; renderOverview();
@@ -464,22 +557,50 @@
   function saveLog() {
     if (isParentView()) { $("logError").textContent = "Parent accounts can view logs but cannot edit them."; return false; }
     const id = $("logSessionId").value; const session = state.schedule.find((item) => item.id === id);
-    const status = $("statusInput").value; const topic = $("topicInput").value.trim(); const minutes = status === "missed" ? 0 : Number($("minutesInput").value);
+    const timer = currentLogTimer && state.activeTimer?.sessionId === id ? state.activeTimer : null;
+    const studyDate = $("logDateInput").value;
+    const existingServerResult = timer && state.logs.find((log) => log.sessionId === id && log.date === studyDate && ["Details not added yet", "Session missed"].includes(log.topic));
+    const plannedSeconds = session ? (minutesFromTime(session.end) - minutesFromTime(session.start)) * 60 : 0;
+    const status = timer ? existingServerResult?.status || sessionResultForSeconds(currentLogTimerSeconds, plannedSeconds) : $("statusInput").value;
+    const topic = $("topicInput").value.trim();
+    const minutes = status === "missed" ? 0 : timer ? existingServerResult?.minutes ?? Math.max(1, Math.round(currentLogTimerSeconds / 60)) : Number($("minutesInput").value);
     if (!$("logSubject").value.trim() || (status !== "missed" && !topic) || !$("logDateInput").value || !Number.isInteger(minutes) || minutes < 0 || minutes > 1440) { $("logError").textContent = status === "missed" ? "Add a subject and valid study date." : "Add a subject, topic, valid date, and minutes studied."; return false; }
     if (state.activeTimer && session && state.activeTimer.sessionId === session.id) finishTimerState();
     const date = $("logDateInput").value; const priorIndex = state.logs.findIndex((log) => log.sessionId === id && id && log.date === date);
     const prior = priorIndex >= 0 ? state.logs[priorIndex] : null;
-    const entry = { id: prior?.id || uid(), sessionId: id || null, date, subject: $("logSubject").value.trim(), topic: status === "missed" ? topic || "Session missed" : topic, topicAbout: status === "missed" ? "" : $("topicAboutInput").value.trim(), whatLearned: status === "missed" ? "" : $("learnedInput").value.trim(), topicProgress: status === "missed" ? "not_started" : $("topicProgressInput").value, notUnderstood: status === "missed" ? "" : $("notUnderstoodInput").value.trim(), minutes, notes: $("notesInput").value.trim(), status, plannedStart: session?.start || prior?.plannedStart || null, plannedEnd: session?.end || prior?.plannedEnd || null, createdAt: prior?.createdAt || new Date().toISOString() };
+    const entry = { id: prior?.id || (id ? `session:${id}:${date}` : uid()), sessionId: id || null, date, subject: $("logSubject").value.trim(), topic: status === "missed" ? topic || "Session missed" : topic, topicAbout: status === "missed" ? "" : $("topicAboutInput").value.trim(), whatLearned: status === "missed" ? "" : $("learnedInput").value.trim(), topicProgress: status === "missed" ? "not_started" : $("topicProgressInput").value, notUnderstood: status === "missed" ? "" : $("notUnderstoodInput").value.trim(), minutes, notes: $("notesInput").value.trim(), status, plannedStart: session?.start || prior?.plannedStart || null, plannedEnd: session?.end || prior?.plannedEnd || null, createdAt: prior?.createdAt || new Date().toISOString() };
     if (priorIndex >= 0) state.logs[priorIndex] = entry; else state.logs.push(entry);
     saveState(); $("logDialog").close(); renderOverview(); renderHistory();
     if (isStudentAccount()) void syncLog(entry);
+    currentLogTimer = false; currentLogAutomatic = false; currentLogTimerSeconds = 0;
     showToast(prior ? "Study log updated" : "Study session saved"); return true;
   }
-  function markMissed(session) {
-    const existing = getOccurrenceLog(session.id, todayISO());
+  function markMissed(session, date = todayISO()) {
+    const existing = getOccurrenceLog(session.id, date);
     if (existing) return;
-    state.logs.push({ id: uid(), sessionId: session.id, date: todayISO(), subject: session.subject, topic: "Session missed", topicAbout: "", whatLearned: "", topicProgress: "not_started", notUnderstood: "", minutes: 0, notes: "", status: "missed", plannedStart: session.start, plannedEnd: session.end, createdAt: new Date().toISOString() });
+    state.logs.push({ id: `session:${session.id}:${date}`, sessionId: session.id, date, subject: session.subject, topic: "Session missed", topicAbout: "", whatLearned: "", topicProgress: "not_started", notUnderstood: "", minutes: 0, notes: "", status: "missed", plannedStart: session.start, plannedEnd: session.end, createdAt: new Date().toISOString() });
     saveState(); renderOverview(); renderHistory(); if (isStudentAccount()) void syncLog(state.logs[state.logs.length - 1]); showToast("Session marked as missed");
+  }
+  async function refreshStudyLogs() {
+    if (!supabaseClient || !authUser) return;
+    const studentId = isStudentAccount() ? authUser.id : selectedStudentId;
+    if (!studentId) return;
+    try {
+      const remote = await fetchStudentLogs(studentId);
+      const remoteIds = new Set(remote.map((log) => log.id));
+      const remoteOccurrences = new Set(remote.filter((log) => log.sessionId).map((log) => `${log.sessionId}|${log.date}`));
+      const mergedRemote = remote.map((remoteLog) => {
+        const localLog = state.logs.find((log) => log.id === remoteLog.id || (remoteLog.sessionId && log.sessionId === remoteLog.sessionId && log.date === remoteLog.date));
+        if (!localLog || !remoteLog.sessionId || localLog.topic === "Details not added yet" || localLog.topic === "Session missed") return remoteLog;
+        return { ...remoteLog, topic: localLog.topic, topicAbout: localLog.topicAbout || remoteLog.topicAbout,
+          whatLearned: localLog.whatLearned || remoteLog.whatLearned, topicProgress: localLog.topicProgress || remoteLog.topicProgress,
+          notUnderstood: localLog.notUnderstood || remoteLog.notUnderstood, notes: localLog.notes || remoteLog.notes };
+      });
+      const pendingLocal = state.logs.filter((log) => !remoteIds.has(log.id) && !(log.sessionId && remoteOccurrences.has(`${log.sessionId}|${log.date}`)));
+      state.logs = [...mergedRemote, ...pendingLocal];
+      if (isStudentAccount()) saveState();
+      renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
+    } catch (_) { /* The next refresh will retry. */ }
   }
   function updateLogStatusFields() {
     const missed = $("statusInput").value === "missed";
@@ -503,18 +624,53 @@
   function updateReminderControls() {
     const button = $("reminderToggleBtn"); if (!button) return;
     const enabled = localStorage.getItem(reminderPreferenceKey()) === "true";
+    const pushRegistered = localStorage.getItem(`${reminderPreferenceKey()}:push`) === "true";
     button.textContent = enabled ? "Turn off study reminders" : "Enable study reminders";
-    $("reminderStatus").textContent = enabled ? "Reminders appear while Studywell is open." : "Turn reminders on to get a notice before a lesson and a prompt to log it afterward.";
+    $("reminderStatus").textContent = enabled
+      ? pushRegistered ? "This device is registered for push. Closed-site delivery needs the Supabase push setup to be active." : "Reminders appear while Studywell is open. Closed-site push setup is still needed."
+      : "Turn reminders on for a notice before a lesson and a prompt to update your log afterward.";
+  }
+  function base64UrlToBytes(value) {
+    const padded = `${value}${"=".repeat((4 - value.length % 4) % 4)}`;
+    const binary = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
   }
   async function toggleStudyReminders() {
     const enabled = localStorage.getItem(reminderPreferenceKey()) === "true";
     if (enabled) {
-      localStorage.removeItem(reminderPreferenceKey()); updateReminderControls(); showToast("Study reminders turned off"); return;
+      try {
+        const registration = await navigator.serviceWorker?.getRegistration("./");
+        const subscription = await registration?.pushManager?.getSubscription();
+        if (subscription) {
+          if (isStudentAccount()) await supabaseClient.from("study_push_subscriptions").delete().eq("endpoint", subscription.endpoint);
+          await subscription.unsubscribe();
+        }
+      } catch (_) { /* A stale browser subscription should not block disabling reminders. */ }
+      localStorage.removeItem(reminderPreferenceKey()); localStorage.removeItem(`${reminderPreferenceKey()}:push`); updateReminderControls(); showToast("Study reminders turned off"); return;
     }
     if (!("Notification" in window)) { $("reminderStatus").textContent = "This browser does not support desktop reminders."; return; }
     let permission = Notification.permission;
     if (permission === "default") permission = await Notification.requestPermission();
     if (permission !== "granted") { $("reminderStatus").textContent = "Allow notifications in your browser to turn on study reminders."; return; }
+    if (window.STUDYWELL_SUPABASE?.pushPublicKey && isStudentAccount() && "serviceWorker" in navigator && "PushManager" in window) {
+      try {
+        const registration = await navigator.serviceWorker.register("./service-worker.js");
+        const subscription = await registration.pushManager.getSubscription() || await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: base64UrlToBytes(window.STUDYWELL_SUPABASE.pushPublicKey),
+        });
+        const json = subscription.toJSON();
+        const { error } = await supabaseClient.from("study_push_subscriptions").upsert({
+          endpoint: json.endpoint, student_id: authUser.id,
+          p256dh: json.keys?.p256dh, auth_secret: json.keys?.auth, updated_at: new Date().toISOString(),
+        }, { onConflict: "endpoint" });
+        if (error) throw error;
+        localStorage.setItem(`${reminderPreferenceKey()}:push`, "true");
+      } catch (error) {
+        $("reminderStatus").textContent = error.message || "Could not register this device for push reminders. Check the Supabase push setup.";
+        return;
+      }
+    }
     localStorage.setItem(reminderPreferenceKey(), "true"); updateReminderControls(); showToast("Study reminders enabled");
   }
   function sendStudyReminderOnce(key, title, body) {
@@ -692,6 +848,7 @@
     state = saved || { ...defaultState, name: accountProfile.display_name || "Student", schedule: serverTimetable, logs: [], activeTimer: null };
     state.name = accountProfile.display_name || state.name || "Student";
     state.schedule = serverTimetable;
+    state.weeklyGoalMinutes = Number(accountProfile.weekly_goal_minutes) || 300;
     setCloudStatus("Syncing this student's timetable and study logs…");
     try {
       await uploadStudentLogs(state.logs);
@@ -717,7 +874,7 @@
       logReviews = []; timetableRequests = [];
       return;
     }
-    const { data: profiles, error: profileError } = await supabaseClient.from("study_profiles").select("id,display_name,timetable").in("id", ids);
+     const { data: profiles, error: profileError } = await supabaseClient.from("study_profiles").select("id,display_name,timetable,weekly_goal_minutes,time_zone").in("id", ids);
     if (profileError) throw profileError;
     linkedStudents = (profiles || []).sort((a, b) => (a.display_name || "").localeCompare(b.display_name || ""));
     if (!linkedStudents.some((student) => student.id === selectedStudentId)) selectedStudentId = linkedStudents[0]?.id || null;
@@ -726,7 +883,7 @@
   async function loadSelectedStudent() {
     const student = linkedStudents.find((item) => item.id === selectedStudentId);
     if (!student) return;
-    state = { ...defaultState, name: student.display_name || "Student", schedule: Array.isArray(student.timetable) ? student.timetable : [], logs: [], activeTimer: null };
+    state = { ...defaultState, name: student.display_name || "Student", schedule: Array.isArray(student.timetable) ? student.timetable : [], logs: [], activeTimer: null, weeklyGoalMinutes: Number(student.weekly_goal_minutes) || 300 };
     try { state.logs = await fetchStudentLogs(student.id); setCloudStatus(`Viewing ${student.display_name}'s synced study logs.`); }
     catch (error) { setCloudStatus("Could not load this student's cloud logs."); }
     await loadStudentExtras(student.id);
@@ -754,6 +911,8 @@
     if (error || !profile) { setCloudStatus("Account profile missing. Run the Studywell database setup SQL first."); return; }
     accountProfile = profile;
     try {
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (timeZone && timeZone !== accountProfile.time_zone) void supabaseClient.rpc("update_my_time_zone", { p_time_zone: timeZone });
       if (isParentView()) await loadParentStudents();
       else { linkedStudents = []; selectedStudentId = null; await loadStudentAccountState(); }
       renderCloudControls(); renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
@@ -824,6 +983,7 @@
   $("accountSubmit").addEventListener("click", () => void submitAccountForm());
   $("applyTimetablePresetBtn").addEventListener("click", () => void applyTimetablePreset());
   $("printReportBtn").addEventListener("click", printStudyReport);
+  $("saveWeeklyGoalBtn").addEventListener("click", () => void saveWeeklyGoal());
   $("requestTimetableChangeBtn").addEventListener("click", openTimetableRequestDialog);
   $("timetableRequestForm").addEventListener("submit", (event) => void submitTimetableChangeRequest(event));
   $("reviewForm").addEventListener("submit", (event) => void saveLogReview(event));
@@ -847,6 +1007,8 @@
   });
   $("historyList").addEventListener("click", (event) => {
     const button = event.target.closest("[data-review-log]"); if (button) openReviewDialog(button.dataset.reviewLog);
+    const makeupButton = event.target.closest("[data-makeup-log]");
+    if (makeupButton) { const log = state.logs.find((item) => item.id === makeupButton.dataset.makeupLog); if (log) openTimetableRequestDialog(log); }
   });
   $("timetableRequestList").addEventListener("click", (event) => {
     const button = event.target.closest("[data-request-status]"); if (button) void reviewTimetableChangeRequest(button.dataset.requestId, button.dataset.requestStatus);
@@ -876,11 +1038,11 @@
     const action = button.dataset.action;
     if (action === "view-log") { const log = state.logs.find((item) => item.id === button.dataset.id); if (log) openLogDialog({ log }); return; }
     const session = state.schedule.find((item) => item.id === button.dataset.id); if (!session) return;
-    if (action === "finish") return finishTimer(session);
-    if (action === "pause") return pauseTimer(session);
-    if (action === "resume") return resumeTimer(session);
-    if (isDue(session, todayISO())) return openLogDialog({ session });
-    startTimer(session);
+    if (action === "finish") return void finishTimer(session);
+    if (action === "pause") return void pauseTimer(session);
+    if (action === "resume") return void resumeTimer(session);
+    if (isDue(session, todayISO())) return;
+    void startTimer(session);
   });
   $("sessionForm").addEventListener("submit", async (event) => {
     if (event.submitter?.value === "cancel") return;
@@ -906,6 +1068,14 @@
   ["sessionDialog", "logDialog", "nameDialog"].forEach((id) => $(id).addEventListener("click", (event) => { if (event.target === $(id)) $(id).close(); }));
   document.addEventListener("click", (event) => { const go = event.target.closest("[data-go]"); if (go && go.closest(".page-view")) navigate(go.dataset.go); });
   renderOverview();
-  window.setInterval(() => { if (!state.activeTimer) renderOverview(); checkStudyReminders(); }, 30000);
+  window.setInterval(() => {
+    if (!state.activeTimer) renderOverview();
+    if (!authUser) for (const session of state.schedule.filter((item) => Number(item.day) === new Date().getDay())) {
+      const timerBelongsHere = state.activeTimer?.sessionId === session.id && state.activeTimer?.date === todayISO();
+      if (isDue(session, todayISO()) && !timerBelongsHere) markMissed(session);
+    }
+    checkStudyReminders();
+    if (authUser) void refreshStudyLogs();
+  }, 30000);
   void initializeCloud().finally(ensureTimerLoop);
 })();
