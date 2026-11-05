@@ -3,6 +3,7 @@
 -- Public sign-up can create Parent or Student accounts only. Assign Admin manually
 -- to the intended owner account after that account has signed up; example at bottom.
 -- Parent accounts link students; Admin accounts oversee linked students and timetables.
+-- Safe to rerun to add the latest review and timetable-request features; existing study logs are kept.
 
 create table if not exists public.study_profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -64,6 +65,31 @@ alter table public.study_logs
   add column if not exists topic_progress text not null default 'in_progress'
     check (topic_progress in ('completed', 'in_progress', 'needs_help', 'not_started')),
   add column if not exists not_understood text not null default '';
+
+create table if not exists public.study_log_reviews (
+  student_id uuid not null,
+  log_id text not null,
+  reviewer_id uuid not null references public.study_profiles(id) on delete cascade,
+  comment text not null default '',
+  reviewed boolean not null default true,
+  updated_at timestamptz not null default now(),
+  primary key (student_id, log_id, reviewer_id),
+  foreign key (student_id, log_id) references public.study_logs(student_id, id) on delete cascade
+);
+
+create table if not exists public.study_timetable_requests (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.study_profiles(id) on delete cascade,
+  request_text text not null check (pg_catalog.char_length(request_text) between 1 and 800),
+  status text not null default 'pending' check (status in ('pending', 'approved', 'declined')),
+  admin_response text not null default '',
+  reviewed_by uuid references public.study_profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  reviewed_at timestamptz
+);
+
+create index if not exists study_timetable_requests_student_idx
+  on public.study_timetable_requests (student_id, created_at desc);
 
 create index if not exists study_logs_student_date_idx
   on public.study_logs (student_id, study_date desc);
@@ -236,15 +262,51 @@ begin
 end;
 $$;
 
+create or replace function public.review_study_timetable_request(p_request_id uuid, p_status text, p_response text default '')
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user uuid := (select auth.uid());
+  v_student uuid;
+begin
+  if v_user is null then raise exception 'Sign in first'; end if;
+  if not public.is_studywell_admin() then raise exception 'Only an admin can review timetable requests'; end if;
+  if p_status is null or p_status not in ('approved', 'declined') then
+    raise exception 'Choose approved or declined';
+  end if;
+  select student_id into v_student
+  from public.study_timetable_requests
+  where id = p_request_id;
+  if not found then raise exception 'Timetable request not found'; end if;
+  if not exists (select 1 from public.study_access where student_id = v_student) then
+    raise exception 'This request is not from a linked student';
+  end if;
+
+  update public.study_timetable_requests
+  set status = p_status,
+      admin_response = coalesce(pg_catalog.btrim(p_response), ''),
+      reviewed_by = v_user,
+      reviewed_at = pg_catalog.now()
+  where id = p_request_id;
+end;
+$$;
+
 alter table public.study_profiles enable row level security;
 alter table public.study_access enable row level security;
 alter table public.study_invites enable row level security;
 alter table public.study_logs enable row level security;
+alter table public.study_log_reviews enable row level security;
+alter table public.study_timetable_requests enable row level security;
 
-revoke all on table public.study_profiles, public.study_access, public.study_invites, public.study_logs from public, anon, authenticated;
+revoke all on table public.study_profiles, public.study_access, public.study_invites, public.study_logs, public.study_log_reviews, public.study_timetable_requests from public, anon, authenticated;
 grant select on table public.study_profiles to authenticated;
 grant select on table public.study_access to authenticated;
 grant select, insert, update, delete on table public.study_logs to authenticated;
+grant select, insert, update on table public.study_log_reviews to authenticated;
+grant select, insert on table public.study_timetable_requests to authenticated;
 
 drop policy if exists "Read own or linked profiles" on public.study_profiles;
 create policy "Read own or linked profiles"
@@ -301,6 +363,67 @@ create policy "Students delete own logs"
   on public.study_logs for delete to authenticated
   using (student_id = (select auth.uid()) and (select public.is_studywell_student()));
 
+drop policy if exists "Read accessible study log reviews" on public.study_log_reviews;
+create policy "Read accessible study log reviews"
+  on public.study_log_reviews for select to authenticated
+  using (
+    student_id = (select auth.uid())
+    or exists (
+      select 1 from public.study_access a
+      where a.student_id = study_log_reviews.student_id
+        and (a.parent_id = (select auth.uid()) or (select public.is_studywell_admin()))
+    )
+  );
+
+drop policy if exists "Parents and admins add study log reviews" on public.study_log_reviews;
+create policy "Parents and admins add study log reviews"
+  on public.study_log_reviews for insert to authenticated
+  with check (
+    reviewer_id = (select auth.uid())
+    and exists (
+      select 1 from public.study_access a
+      where a.student_id = study_log_reviews.student_id
+        and (a.parent_id = (select auth.uid()) or (select public.is_studywell_admin()))
+    )
+  );
+
+drop policy if exists "Parents and admins update study log reviews" on public.study_log_reviews;
+create policy "Parents and admins update study log reviews"
+  on public.study_log_reviews for update to authenticated
+  using (
+    reviewer_id = (select auth.uid())
+    and exists (
+      select 1 from public.study_access a
+      where a.student_id = study_log_reviews.student_id
+        and (a.parent_id = (select auth.uid()) or (select public.is_studywell_admin()))
+    )
+  )
+  with check (
+    reviewer_id = (select auth.uid())
+    and exists (
+      select 1 from public.study_access a
+      where a.student_id = study_log_reviews.student_id
+        and (a.parent_id = (select auth.uid()) or (select public.is_studywell_admin()))
+    )
+  );
+
+drop policy if exists "Read accessible timetable requests" on public.study_timetable_requests;
+create policy "Read accessible timetable requests"
+  on public.study_timetable_requests for select to authenticated
+  using (
+    student_id = (select auth.uid())
+    or exists (
+      select 1 from public.study_access a
+      where a.student_id = study_timetable_requests.student_id
+        and (a.parent_id = (select auth.uid()) or (select public.is_studywell_admin()))
+    )
+  );
+
+drop policy if exists "Students request timetable changes" on public.study_timetable_requests;
+create policy "Students request timetable changes"
+  on public.study_timetable_requests for insert to authenticated
+  with check (student_id = (select auth.uid()) and (select public.is_studywell_student()));
+
 revoke all on function public.is_studywell_admin() from public, anon, authenticated;
 grant execute on function public.is_studywell_admin() to authenticated;
 revoke all on function public.is_studywell_student() from public, anon, authenticated;
@@ -314,6 +437,8 @@ grant execute on function public.update_my_display_name(text) to authenticated;
 drop function if exists public.update_my_study_profile(text, jsonb);
 revoke all on function public.update_student_timetable(uuid, jsonb) from public, anon, authenticated;
 grant execute on function public.update_student_timetable(uuid, jsonb) to authenticated;
+revoke all on function public.review_study_timetable_request(uuid, text, text) from public, anon, authenticated;
+grant execute on function public.review_study_timetable_request(uuid, text, text) to authenticated;
 revoke all on function public.handle_new_study_user() from public, anon, authenticated;
 
 -- After the owner has created their Parent account, make it the admin account

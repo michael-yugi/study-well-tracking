@@ -52,6 +52,8 @@
   let accountProfile = null;
   let linkedStudents = [];
   let selectedStudentId = null;
+  let logReviews = [];
+  let timetableRequests = [];
   let authMode = "signin";
   let state = loadState();
   let timerInterval = null;
@@ -93,10 +95,31 @@
   function durationCompact(minutes) { const m = Math.max(0, Math.round(minutes || 0)); const h = Math.floor(m / 60); return h ? `${h}h${m % 60 ? ` ${m % 60}m` : ""}` : `${m}m`; }
   function logsForWeek() { const dates = weekDates(); const first = toISO(dates[0]); const last = toISO(dates[6]); return state.logs.filter((log) => log.date >= first && log.date <= last); }
   function getOccurrenceLog(sessionId, date) { return state.logs.find((log) => log.sessionId === sessionId && log.date === date); }
+  function sessionBoundary(session, date, part) {
+    const [year, month, day] = date.split("-").map(Number);
+    const [hour, minute] = session[part].split(":").map(Number);
+    return new Date(year, month - 1, day, hour, minute).getTime();
+  }
+  function timerEndAt(timer, session = null) {
+    const savedEnd = Number(timer?.plannedEndAt);
+    if (Number.isFinite(savedEnd) && savedEnd > 0) return savedEnd;
+    const linkedSession = session || state.schedule.find((item) => item.id === timer?.sessionId);
+    return linkedSession && timer?.date ? sessionBoundary(linkedSession, timer.date, "end") : 0;
+  }
+  function timerElapsedMs(timer = state.activeTimer, now = Date.now()) {
+    if (!timer) return 0;
+    const accumulated = Math.max(0, Number(timer.accumulatedMs) || 0);
+    if (timer.pausedAt || timer.autoStoppedAt || timer.manualStopped) return accumulated;
+    const runningSince = Number(timer.runningSince || timer.startedAt);
+    if (!runningSince) return accumulated;
+    const session = state.schedule.find((item) => item.id === timer.sessionId);
+    const plannedStartAt = Number(timer.plannedStartAt) || (session && timer.date ? sessionBoundary(session, timer.date, "start") : 0);
+    const endAt = timerEndAt(timer);
+    const boundedNow = endAt ? Math.min(now, endAt) : now;
+    return accumulated + Math.max(0, boundedNow - Math.max(runningSince, plannedStartAt));
+  }
   function isDue(session, date) {
-    const [y, m, d] = date.split("-").map(Number);
-    const end = new Date(y, m - 1, d, ...session.end.split(":").map(Number));
-    return end.getTime() <= Date.now();
+    return sessionBoundary(session, date, "end") <= Date.now();
   }
   function updateHeader() {
     const name = state.name || "Student";
@@ -113,8 +136,10 @@
     updateHeader();
     const dates = weekDates(); const weekLogs = logsForWeek();
     const totalMinutes = weekLogs.reduce((sum, log) => sum + Number(log.minutes || 0), 0);
+    const todayMinutes = state.logs.filter((log) => log.date === todayISO()).reduce((sum, log) => sum + Number(log.minutes || 0), 0);
     const h = Math.floor(totalMinutes / 60); const m = totalMinutes % 60;
     $("weekTime").innerHTML = `${h}<span>h</span> ${m}<span>m</span>`;
+    $("weekTimeCaption").textContent = `Today: ${durationLabel(todayMinutes)} focused`;
     const loggedCompleted = weekLogs.filter((log) => log.status === "completed").length;
     $("completedValue").textContent = String(loggedCompleted);
     $("completedCaption").textContent = `${loggedCompleted === 1 ? "session" : "sessions"} fully completed this week`;
@@ -150,12 +175,20 @@
     }
     $("todaySessions").innerHTML = sessions.map((session) => {
       const log = getOccurrenceLog(session.id, iso); const active = state.activeTimer?.sessionId === session.id && state.activeTimer.date === iso;
+      const startAt = sessionBoundary(session, iso, "start"); const endAt = sessionBoundary(session, iso, "end"); const now = Date.now();
       let action, statusClass = "";
-      if (active) { statusClass = "status-live"; action = `<button class="session-action timer-action" data-action="finish" data-id="${escapeHTML(session.id)}">${formatElapsed()}</button>`; }
+      if (active) {
+        const stopped = Boolean(state.activeTimer.autoStoppedAt || state.activeTimer.manualStopped);
+        const paused = Boolean(state.activeTimer.pausedAt);
+        statusClass = "status-live";
+        action = `<span class="timer-controls"><span class="timer-clock ${paused || stopped ? "timer-paused" : ""}">${formatElapsed()}</span>${stopped ? `<button class="timer-control" data-action="finish" data-id="${escapeHTML(session.id)}">Log</button>` : `<button class="timer-control" data-action="${paused ? "resume" : "pause"}" data-id="${escapeHTML(session.id)}">${paused ? "Resume" : "Pause"}</button><button class="timer-control timer-finish" data-action="finish" data-id="${escapeHTML(session.id)}">Finish</button>`}</span>`;
+      }
       else if (log) { statusClass = `status-${log.status === "completed" ? "done" : log.status}`; action = `<button class="session-action done-action" data-action="view-log" data-id="${escapeHTML(log.id)}">${log.status === "missed" ? "Missed" : `${durationCompact(log.minutes)} · ${log.status === "partial" ? "Partial" : "Logged"}`}</button>`; }
       else if (isParentView()) { action = `<button class="session-action" disabled>Not logged</button>`; }
       else if (state.activeTimer) { action = `<button class="session-action" disabled title="Finish the active timer first">Waiting</button>`; }
-      else { action = `<button class="session-action ${isDue(session, iso) ? "missed-action" : ""}" data-action="start-or-log" data-id="${escapeHTML(session.id)}">${isDue(session, iso) ? "Log session" : "Start timer"}</button>`; }
+      else if (now < startAt) { action = `<button class="session-action" disabled title="The timer opens at the scheduled start time">Starts ${formatTime(session.start)}</button>`; }
+      else if (now >= endAt) { action = `<button class="session-action missed-action" data-action="start-or-log" data-id="${escapeHTML(session.id)}">Log session</button>`; }
+      else { action = `<button class="session-action" data-action="start-or-log" data-id="${escapeHTML(session.id)}">Start timer</button>`; }
       const focus = log ? log.topic : session.focus || "Planned study time";
       return `<div class="session-row ${statusClass}"><span class="session-time">${formatTime(session.start)}<br>${formatTime(session.end)}</span><span class="session-line"></span><span class="session-info"><strong class="session-subject">${escapeHTML(session.subject)}</strong><span class="session-focus">${escapeHTML(focus)}</span></span>${action}</div>`;
     }).join("");
@@ -186,18 +219,141 @@
   function reflectionMarkup(label, value) {
     return value ? `<div class="reflection-item"><strong>${label}</strong><p>${escapeHTML(value)}</p></div>` : "";
   }
+  function weeklySummaryData() {
+    const dates = weekDates(); const first = toISO(dates[0]); const last = toISO(dates[6]);
+    const weekLogs = state.logs.filter((log) => log.date >= first && log.date <= last);
+    const plans = dates.flatMap((date) => state.schedule.filter((session) => Number(session.day) === date.getDay()).map((session) => ({ session, date: toISO(date) })));
+    const duePlans = plans.filter(({ session, date }) => sessionBoundary(session, date, "end") <= Date.now());
+    const loggedPlans = duePlans.filter(({ session, date }) => getOccurrenceLog(session.id, date));
+    const topics = [...new Set(weekLogs.filter((log) => log.status !== "missed" && log.topic).map((log) => `${log.subject}: ${log.topic}`))];
+    const needsHelp = weekLogs.filter((log) => log.status !== "missed" && (log.topicProgress === "needs_help" || log.notUnderstood));
+    return {
+      weekLogs, plans, duePlans, loggedPlans,
+      completed: weekLogs.filter((log) => log.status === "completed").length,
+      partial: weekLogs.filter((log) => log.status === "partial").length,
+      missed: weekLogs.filter((log) => log.status === "missed").length,
+      unlogged: Math.max(0, duePlans.length - loggedPlans.length),
+      minutes: weekLogs.reduce((sum, log) => sum + Number(log.minutes || 0), 0),
+      topics, needsHelp,
+    };
+  }
+  function renderWeeklySummary() {
+    const summary = weeklySummaryData();
+    $("weeklySummaryTitle").textContent = isParentView() ? `${state.name || "Student"}'s progress this week` : "Your progress this week";
+    $("weeklySummaryStats").innerHTML = [
+      ["Planned", `${summary.plans.length}`, "sessions this week"],
+      ["Logged", `${summary.loggedPlans.length} / ${summary.duePlans.length}`, "sessions due so far"],
+      ["Focused time", durationLabel(summary.minutes), "total this week"],
+      ["Needs help", `${summary.needsHelp.length}`, "topics to review"],
+    ].map(([label, value, caption]) => `<div class="summary-stat"><span>${label}</span><strong>${value}</strong><small>${caption}</small></div>`).join("");
+    const topicText = summary.topics.length ? `Topics covered: ${summary.topics.slice(0, 4).join(" · ")}${summary.topics.length > 4 ? ` · +${summary.topics.length - 4} more` : ""}. ` : "No topics logged this week yet. ";
+    $("weeklySummaryNote").textContent = `${topicText}${summary.completed} completed · ${summary.partial} partial · ${summary.missed} missed · ${summary.unlogged} due session${summary.unlogged === 1 ? "" : "s"} not logged.`;
+  }
+  function printStudyReport() {
+    const range = $("reportRange").value; const today = new Date();
+    let start, end;
+    if (range === "month") { start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29); end = new Date(today.getFullYear(), today.getMonth(), today.getDate()); }
+    else { [start, , end] = weekDates(); }
+    const startISO = toISO(start), endISO = toISO(end);
+    const logs = [...state.logs].filter((log) => log.date >= startISO && log.date <= endISO).sort((a, b) => `${a.date}${a.createdAt || ""}`.localeCompare(`${b.date}${b.createdAt || ""}`));
+    const minutes = logs.reduce((sum, log) => sum + Number(log.minutes || 0), 0);
+    const needsHelp = logs.filter((log) => log.topicProgress === "needs_help" || log.notUnderstood).length;
+    const reportWindow = window.open("", "_blank");
+    if (!reportWindow) { showToast("Allow pop-ups to print the report"); return; }
+    const rows = logs.map((log) => {
+      const reportStudentId = selectedStudentId || authUser?.id;
+      const reviewComments = logReviews.filter((review) => review.student_id === reportStudentId && review.log_id === log.id && review.comment).map((review) => review.comment).join(" · ");
+      return `<tr><td>${escapeHTML(formatDate(fromISO(log.date), { month: "short", day: "numeric", year: "numeric" }))}</td><td>${escapeHTML(log.subject)}</td><td>${escapeHTML(log.topic)}${log.whatLearned ? `<small>Learned: ${escapeHTML(log.whatLearned)}</small>` : ""}${log.notUnderstood ? `<small>Needs help: ${escapeHTML(log.notUnderstood)}</small>` : ""}${reviewComments ? `<small>Parent review: ${escapeHTML(reviewComments)}</small>` : ""}</td><td>${escapeHTML(durationLabel(log.minutes))}</td><td>${escapeHTML(topicProgressLabel(log.topicProgress))}</td><td>${escapeHTML(log.status)}</td></tr>`;
+    }).join("");
+    const rangeLabel = `${formatDate(start, { month: "long", day: "numeric", year: "numeric" })} – ${formatDate(end, { month: "long", day: "numeric", year: "numeric" })}`;
+    reportWindow.document.open();
+    reportWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Studywell progress report</title><style>body{font:14px Arial,sans-serif;color:#24301f;margin:36px}h1{margin:0 0 6px}p{color:#596354}.stats{display:flex;gap:20px;margin:22px 0}.stats div{padding:14px;background:#f1f5e9;border-radius:8px;min-width:120px}.stats strong,.stats span{display:block}.stats span{font-size:12px;color:#687064;margin-top:5px}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{text-align:left;vertical-align:top;padding:9px;border-bottom:1px solid #dfe4d7}th{background:#f4f6ef}small{display:block;margin-top:5px;color:#66735b}footer{margin-top:28px;color:#8a9381;font-size:11px}@media print{body{margin:14mm}button{display:none}}</style></head><body><h1>Studywell progress report</h1><p>${escapeHTML(state.name || "Student")} · ${escapeHTML(rangeLabel)}</p><section class="stats"><div><strong>${escapeHTML(durationLabel(minutes))}</strong><span>Total focused time</span></div><div><strong>${logs.length}</strong><span>Study records</span></div><div><strong>${needsHelp}</strong><span>Topics needing help</span></div></section><table><thead><tr><th>Date</th><th>Subject</th><th>Learning notes</th><th>Time</th><th>Topic progress</th><th>Session</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No study entries in this period.</td></tr>`}</tbody></table><footer>Created by Michael Yugi · Studywell</footer><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));</script></body></html>`);
+    reportWindow.document.close();
+  }
+  function renderLogReviews(log) {
+    const studentId = selectedStudentId || authUser?.id;
+    const reviews = logReviews.filter((review) => review.student_id === studentId && review.log_id === log.id);
+    const reviewNotes = reviews.map((review) => `<div class="parent-review"><strong>${review.reviewed ? "Reviewed" : "Parent note"}</strong>${review.comment ? `<p>${escapeHTML(review.comment)}</p>` : ""}<small>${formatDate(new Date(review.updated_at || Date.now()), { month: "short", day: "numeric" })}</small></div>`).join("");
+    const myReview = reviews.find((review) => review.reviewer_id === authUser?.id);
+    const reviewButton = isParentView() ? `<button class="text-button review-log-button" data-review-log="${escapeHTML(log.id)}">${myReview ? "Update review" : "Mark reviewed / comment"}</button>` : "";
+    return reviewNotes || reviewButton ? `<div class="review-area">${reviewNotes}${reviewButton}</div>` : "";
+  }
+  function openReviewDialog(logId) {
+    if (!isParentView()) return;
+    const log = state.logs.find((item) => item.id === logId); if (!log) return;
+    const mine = logReviews.find((review) => review.log_id === logId && review.reviewer_id === authUser.id);
+    $("reviewLogId").value = logId; $("reviewLogSummary").textContent = `${log.subject} · ${log.topic}`;
+    $("reviewCommentInput").value = mine?.comment || ""; $("reviewError").textContent = "";
+    $("reviewDialog").showModal();
+  }
+  async function saveLogReview(event) {
+    event.preventDefault();
+    if (!isParentView() || !selectedStudentId) { $("reviewError").textContent = "Select a linked student first."; return; }
+    const logId = $("reviewLogId").value;
+    const review = { student_id: selectedStudentId, log_id: logId, reviewer_id: authUser.id, comment: $("reviewCommentInput").value.trim(), reviewed: true, updated_at: new Date().toISOString() };
+    $("saveReviewBtn").disabled = true; $("reviewError").textContent = "";
+    try {
+      const { data, error } = await supabaseClient.from("study_log_reviews").upsert(review, { onConflict: "student_id,log_id,reviewer_id" }).select().single();
+      if (error) throw error;
+      logReviews = logReviews.filter((item) => !(item.student_id === data.student_id && item.log_id === data.log_id && item.reviewer_id === data.reviewer_id));
+      logReviews.unshift(data); $("reviewDialog").close(); renderHistory(); showToast("Study log marked reviewed");
+    } catch (error) { $("reviewError").textContent = error.message || "Could not save the review. Run the latest Supabase setup SQL."; }
+    finally { $("saveReviewBtn").disabled = false; }
+  }
+  function renderTimetableRequests() {
+    const panel = $("timetableRequestsPanel"); if (!panel) return;
+    const visible = Boolean(authUser) && (!isParentView() || Boolean(selectedStudentId));
+    panel.hidden = !visible; $("requestTimetableChangeBtn").hidden = !isStudentAccount();
+    if (!visible) return;
+    const list = $("timetableRequestList");
+    if (!timetableRequests.length) { list.innerHTML = `<p class="empty-requests">${isAdminAccount() ? "No timetable change requests for this student." : isStudentAccount() ? "You have not sent a timetable change request." : "No timetable change requests for this student."}</p>`; return; }
+    list.innerHTML = timetableRequests.map((request) => {
+      const statusLabel = request.status === "approved" ? "Approved" : request.status === "declined" ? "Declined" : "Pending";
+      const adminActions = isAdminAccount() && request.status === "pending" ? `<div class="request-actions"><button class="button button-quiet" data-request-status="approved" data-request-id="${escapeHTML(request.id)}">Approve</button><button class="button button-quiet" data-request-status="declined" data-request-id="${escapeHTML(request.id)}">Decline</button></div>` : "";
+      return `<article class="request-card"><div class="request-card-heading"><strong>${statusLabel}</strong><small>${formatDate(new Date(request.created_at), { month: "short", day: "numeric" })}</small></div><p>${escapeHTML(request.request_text)}</p>${request.admin_response ? `<small>Admin response: ${escapeHTML(request.admin_response)}</small>` : ""}${request.status === "approved" && isStudentAccount() ? `<small>The admin will update your timetable.</small>` : ""}${adminActions}</article>`;
+    }).join("");
+  }
+  function openTimetableRequestDialog() {
+    if (!isStudentAccount()) return;
+    $("timetableRequestForm").reset(); $("timetableRequestError").textContent = ""; $("timetableRequestDialog").showModal();
+  }
+  async function submitTimetableChangeRequest(event) {
+    event.preventDefault();
+    if (!isStudentAccount()) return;
+    const requestText = $("timetableRequestInput").value.trim();
+    if (!requestText) { $("timetableRequestError").textContent = "Describe the timetable change you would like."; return; }
+    $("submitTimetableRequestBtn").disabled = true; $("timetableRequestError").textContent = "";
+    try {
+      const { error } = await supabaseClient.from("study_timetable_requests").insert({ student_id: authUser.id, request_text: requestText });
+      if (error) throw error;
+      timetableRequests = await fetchTimetableRequests(authUser.id); $("timetableRequestDialog").close(); renderTimetableRequests(); showToast("Change request sent to the admin");
+    } catch (error) { $("timetableRequestError").textContent = error.message || "Could not send the request. Run the latest Supabase setup SQL."; }
+    finally { $("submitTimetableRequestBtn").disabled = false; }
+  }
+  async function reviewTimetableChangeRequest(requestId, status) {
+    if (!isAdminAccount()) return;
+    try {
+      const { error } = await supabaseClient.rpc("review_study_timetable_request", { p_request_id: requestId, p_status: status, p_response: "" });
+      if (error) throw error;
+      timetableRequests = await fetchTimetableRequests(selectedStudentId); renderTimetableRequests();
+      showToast(status === "approved" ? "Request approved; update the timetable when ready" : "Request declined");
+    } catch (error) { setCloudStatus(error.message || "Could not update the timetable request. Run the latest Supabase setup SQL."); }
+  }
   function renderHistory() {
+    renderWeeklySummary();
     const query = $("logSearch").value.trim().toLowerCase();
     const logs = [...state.logs].filter((log) => `${log.subject} ${log.topic} ${log.topicAbout || ""} ${log.whatLearned || ""} ${log.notUnderstood || ""} ${log.notes || ""}`.toLowerCase().includes(query)).sort((a, b) => `${b.date}${b.createdAt || ""}`.localeCompare(`${a.date}${a.createdAt || ""}`));
     $("historyCount").textContent = `${logs.length} ${logs.length === 1 ? "study session" : "study sessions"}`;
     if (!logs.length) { $("historyList").innerHTML = query ? `<div class="empty-history"><strong>No matches yet</strong><span>Try a different subject or topic.</span></div>` : `<div class="empty-history"><span class="empty-plan-icon">◷</span><strong>Your learning starts here</strong><span>Log a session to keep track of what you studied.</span></div>`; return; }
     $("historyList").innerHTML = logs.map((log) => {
+      const plannedMinutes = log.plannedStart && log.plannedEnd ? minutesFromTime(log.plannedEnd) - minutesFromTime(log.plannedStart) : 0;
+      const durationSummary = `${durationLabel(log.minutes)} focused${plannedMinutes > 0 ? ` · ${durationLabel(plannedMinutes)} planned` : ""}`;
       const reflections = [
         reflectionMarkup("What this topic is about", log.topicAbout),
         reflectionMarkup("What I learned", log.whatLearned),
         reflectionMarkup("What I didn’t understand properly", log.notUnderstood),
       ].join("");
-      return `<article class="history-card"><div class="history-card-top"><div class="history-subject"><div class="subject-badge color-${(log.subject.charCodeAt(0) || 0) % 4}">${escapeHTML(log.subject.trim().charAt(0).toUpperCase())}</div><div><strong>${escapeHTML(log.subject)}</strong><span>${formatDate(fromISO(log.date), { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div></div><span class="duration-pill">${durationLabel(log.minutes)} studied</span></div><div class="history-topic">${escapeHTML(log.topic)}</div>${reflections ? `<div class="history-reflections">${reflections}</div>` : ""}${log.notes ? `<div class="history-notes"><strong>Next step or other notes</strong><p>${escapeHTML(log.notes)}</p></div>` : ""}<div class="history-foot"><span>${log.plannedStart ? `Planned ${formatTime(log.plannedStart)}${log.plannedEnd ? `–${formatTime(log.plannedEnd)}` : ""}` : "Independent study"}</span><span class="topic-progress-pill">${topicProgressLabel(log.topicProgress)}</span><span class="status-pill ${log.status === "partial" ? "partial" : ""}">${log.status === "partial" ? "Partly completed" : log.status === "missed" ? "Missed session" : log.sessionId ? "Completed as planned" : "Study logged"}</span></div></article>`;
+      return `<article class="history-card"><div class="history-card-top"><div class="history-subject"><div class="subject-badge color-${(log.subject.charCodeAt(0) || 0) % 4}">${escapeHTML(log.subject.trim().charAt(0).toUpperCase())}</div><div><strong>${escapeHTML(log.subject)}</strong><span>${formatDate(fromISO(log.date), { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div></div><span class="duration-pill">${durationSummary}</span></div><div class="history-topic">${escapeHTML(log.topic)}</div>${reflections ? `<div class="history-reflections">${reflections}</div>` : ""}${log.notes ? `<div class="history-notes"><strong>Next step or other notes</strong><p>${escapeHTML(log.notes)}</p></div>` : ""}${renderLogReviews(log)}<div class="history-foot"><span>${log.plannedStart ? `Planned ${formatTime(log.plannedStart)}${log.plannedEnd ? `–${formatTime(log.plannedEnd)}` : ""}` : "Independent study"}</span><span class="topic-progress-pill">${topicProgressLabel(log.topicProgress)}</span><span class="status-pill ${log.status === "partial" ? "partial" : ""}">${log.status === "partial" ? "Partly completed" : log.status === "missed" ? "Missed session" : log.sessionId ? "Completed as planned" : "Study logged"}</span></div></article>`;
     }).join("");
   }
   function navigate(view) {
@@ -231,22 +387,78 @@
     $("notUnderstoodInput").value = log?.notUnderstood || "";
     $("minutesInput").value = log ? log.minutes : minutes ?? (session ? Math.max(1, minutesFromTime(session.end) - minutesFromTime(session.start)) : "");
     $("logDateInput").value = log?.date || todayISO(); $("logDateInput").max = todayISO(); $("notesInput").value = log?.notes || ""; $("statusInput").value = log?.status || "completed";
-    $("plannedForLabel").textContent = session ? `Planned ${formatTime(session.start)}–${formatTime(session.end)}` : log?.plannedStart ? `Planned ${formatTime(log.plannedStart)}–${formatTime(log.plannedEnd)}` : "Independent study";
-    $("timerBanner").hidden = !timer; $("saveLogBtn").textContent = log ? "Save changes" : "Save study log"; updateLogStatusFields();
+    const plannedStart = session?.start || log?.plannedStart; const plannedEnd = session?.end || log?.plannedEnd;
+    const plannedMinutes = plannedStart && plannedEnd ? minutesFromTime(plannedEnd) - minutesFromTime(plannedStart) : 0;
+    $("plannedForLabel").textContent = plannedMinutes ? `Planned ${formatTime(plannedStart)}–${formatTime(plannedEnd)} · ${durationLabel(plannedMinutes)} planned` : "Independent study";
+    $("timerBanner").hidden = !timer;
+    if (timer) $("timerCopy").textContent = state.activeTimer?.autoStoppedAt ? "Stopped at the planned end" : state.activeTimer?.manualStopped ? "Timer finished" : state.activeTimer?.pausedAt ? "Timer paused" : "Focused time";
+    $("saveLogBtn").textContent = log ? "Save changes" : "Save study log"; updateLogStatusFields();
     ["logSubject", "topicInput", "topicAboutInput", "learnedInput", "topicProgressInput", "notUnderstoodInput", "minutesInput", "logDateInput", "notesInput", "statusInput"].forEach((id) => { $(id).disabled = readOnly || (id !== "logSubject" && id !== "logDateInput" && id !== "notesInput" && $("statusInput").value === "missed"); });
     $("saveLogBtn").hidden = readOnly;
     $("logDialog").showModal(); if (timer) updateTimerText(); if (!readOnly) $("topicInput").focus();
   }
-  function formatElapsed() { if (!state.activeTimer) return "Start timer"; const sec = Math.max(0, Math.floor((Date.now() - state.activeTimer.startedAt) / 1000)); return `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`; }
+  function formatElapsed() { if (!state.activeTimer) return "00:00"; const sec = Math.max(0, Math.floor(timerElapsedMs() / 1000)); return `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`; }
   function updateTimerText() { $("timerText").textContent = formatElapsed(); }
   function startTimer(session) {
     if (isParentView() || state.activeTimer) return;
-    state.activeTimer = { sessionId: session.id, date: todayISO(), startedAt: Date.now() }; saveState();
-    timerInterval = setInterval(() => { updateTimerText(); renderToday(); }, 1000); renderOverview(); showToast(`Focus timer started for ${session.subject}`);
+    const date = todayISO(); const now = Date.now(); const plannedStartAt = sessionBoundary(session, date, "start"); const plannedEndAt = sessionBoundary(session, date, "end");
+    if (now < plannedStartAt) return;
+    if (now >= plannedEndAt) { openLogDialog({ session }); return; }
+    state.activeTimer = { sessionId: session.id, date, startedAt: now, runningSince: now, accumulatedMs: 0, plannedStartAt, plannedEndAt, pausedAt: null, autoStoppedAt: null, manualStopped: false };
+    saveState(); ensureTimerLoop(); renderOverview(); showToast(`Focus timer started for ${session.subject}`);
+  }
+  function pauseTimer(session) {
+    const timer = state.activeTimer; if (!timer || timer.pausedAt || timer.autoStoppedAt || timer.manualStopped) return;
+    const now = Date.now(); const endAt = timerEndAt(timer, session);
+    if (endAt && now >= endAt) return autoStopTimer(session);
+    timer.accumulatedMs = timerElapsedMs(timer, now); timer.runningSince = null; timer.pausedAt = now;
+    saveState(); updateTimerText(); renderOverview(); showToast("Timer paused");
+  }
+  function resumeTimer(session) {
+    const timer = state.activeTimer; if (!timer || !timer.pausedAt || timer.autoStoppedAt || timer.manualStopped) return;
+    const now = Date.now(); const endAt = timerEndAt(timer, session);
+    if (endAt && now >= endAt) return autoStopTimer(session);
+    timer.runningSince = now; timer.pausedAt = null;
+    saveState(); ensureTimerLoop(); renderOverview(); showToast("Timer resumed");
+  }
+  function timerTick() {
+    const timer = state.activeTimer;
+    if (!timer) { clearInterval(timerInterval); timerInterval = null; return; }
+    const session = state.schedule.find((item) => item.id === timer.sessionId);
+    const endAt = timerEndAt(timer, session);
+    if (!timer.autoStoppedAt && !timer.manualStopped && endAt && Date.now() >= endAt) return autoStopTimer(session);
+    if (!timer.pausedAt && !timer.autoStoppedAt && !timer.manualStopped) updateTimerText();
+    renderToday();
+  }
+  function ensureTimerLoop() {
+    if (!state.activeTimer || state.activeTimer.autoStoppedAt || state.activeTimer.manualStopped) {
+      clearInterval(timerInterval); timerInterval = null; return;
+    }
+    if (!timerInterval) timerInterval = setInterval(timerTick, 1000);
+    timerTick();
+  }
+  function autoStopTimer(session) {
+    const timer = state.activeTimer; if (!timer || timer.autoStoppedAt || timer.manualStopped) return;
+    const endAt = timerEndAt(timer, session); if (!endAt) return;
+    const elapsedMs = timerElapsedMs(timer, endAt);
+    timer.accumulatedMs = elapsedMs; timer.runningSince = null; timer.autoStoppedAt = endAt;
+    saveState(); clearInterval(timerInterval); timerInterval = null; renderOverview();
+    if (session) {
+      openLogDialog({ session, minutes: Math.max(0, Math.round(elapsedMs / 60000)), timer: true });
+      showToast("Timer stopped at the scheduled lesson end");
+    }
   }
   function finishTimer(session) {
-    const elapsed = Math.max(1, Math.round((Date.now() - state.activeTimer.startedAt) / 60000));
-    openLogDialog({ session, minutes: elapsed, timer: true });
+    const timer = state.activeTimer; if (!timer) return;
+    if (timer.autoStoppedAt || timer.manualStopped) {
+      openLogDialog({ session, minutes: Math.max(0, Math.round(timerElapsedMs(timer) / 60000)), timer: true }); return;
+    }
+    const now = Date.now(); const endAt = timerEndAt(timer, session);
+    if (endAt && now >= endAt) return autoStopTimer(session);
+    const elapsedMs = timerElapsedMs(timer, now);
+    timer.accumulatedMs = elapsedMs; timer.runningSince = null; timer.pausedAt = now; timer.manualStopped = true;
+    saveState(); clearInterval(timerInterval); timerInterval = null; renderOverview();
+    openLogDialog({ session, minutes: Math.max(0, Math.round(elapsedMs / 60000)), timer: true });
   }
   function finishTimerState() { state.activeTimer = null; clearInterval(timerInterval); timerInterval = null; }
   function saveLog() {
@@ -286,6 +498,47 @@
   function isAdminAccount() { return Boolean(authUser && accountProfile?.account_type === "admin"); }
   function isParentView() { return Boolean(authUser && ["parent", "admin"].includes(accountProfile?.account_type)); }
   function canEditTimetable() { return isAdminAccount() ? Boolean(selectedStudentId) : !authUser; }
+  function reminderPreferenceKey() { return `${STORAGE_KEY}:reminders:${authUser?.id || "guest"}`; }
+  function reminderSentKey() { return `${STORAGE_KEY}:sent-reminders:${authUser?.id || "guest"}`; }
+  function updateReminderControls() {
+    const button = $("reminderToggleBtn"); if (!button) return;
+    const enabled = localStorage.getItem(reminderPreferenceKey()) === "true";
+    button.textContent = enabled ? "Turn off study reminders" : "Enable study reminders";
+    $("reminderStatus").textContent = enabled ? "Reminders appear while Studywell is open." : "Turn reminders on to get a notice before a lesson and a prompt to log it afterward.";
+  }
+  async function toggleStudyReminders() {
+    const enabled = localStorage.getItem(reminderPreferenceKey()) === "true";
+    if (enabled) {
+      localStorage.removeItem(reminderPreferenceKey()); updateReminderControls(); showToast("Study reminders turned off"); return;
+    }
+    if (!("Notification" in window)) { $("reminderStatus").textContent = "This browser does not support desktop reminders."; return; }
+    let permission = Notification.permission;
+    if (permission === "default") permission = await Notification.requestPermission();
+    if (permission !== "granted") { $("reminderStatus").textContent = "Allow notifications in your browser to turn on study reminders."; return; }
+    localStorage.setItem(reminderPreferenceKey(), "true"); updateReminderControls(); showToast("Study reminders enabled");
+  }
+  function sendStudyReminderOnce(key, title, body) {
+    try {
+      const sent = JSON.parse(localStorage.getItem(reminderSentKey()) || "[]");
+      if (sent.includes(key)) return;
+      new Notification(title, { body, tag: key });
+      localStorage.setItem(reminderSentKey(), JSON.stringify([...sent.slice(-99), key]));
+    } catch (_) { /* Notifications are optional; the tracker still works without them. */ }
+  }
+  function checkStudyReminders() {
+    if (!isStudentAccount() || localStorage.getItem(reminderPreferenceKey()) !== "true" || !("Notification" in window) || Notification.permission !== "granted") return;
+    const today = todayISO(); const now = Date.now(); const tenMinutes = 10 * 60 * 1000;
+    for (const session of state.schedule.filter((item) => Number(item.day) === new Date().getDay())) {
+      const startAt = sessionBoundary(session, today, "start"); const endAt = sessionBoundary(session, today, "end");
+      const log = getOccurrenceLog(session.id, today);
+      if (!log && now >= startAt - tenMinutes && now < startAt) {
+        sendStudyReminderOnce(`start:${today}:${session.id}`, "Studywell lesson reminder", `${session.subject} starts at ${formatTime(session.start)}.`);
+      }
+      if (!log && now >= endAt && now < endAt + 30 * 60 * 1000 && state.activeTimer?.sessionId !== session.id) {
+        sendStudyReminderOnce(`log:${today}:${session.id}`, "Remember to log your lesson", `Add what you studied in ${session.subject}.`);
+      }
+    }
+  }
   function setCloudStatus(message) {
     const button = $("syncAccountBtn");
     if (button) { button.textContent = authUser ? (isAdminAccount() ? "Admin account" : isParentView() ? "Parent account" : "Synced account") : "Sign in to sync"; button.title = message; }
@@ -296,6 +549,8 @@
     $("quickLogBtn").hidden = parent; $("historyLogBtn").hidden = parent; $("addSessionBtn").hidden = !canEditTimetable();
     $("editNameBtn").hidden = parent;
     $("adminTimetableTools").hidden = !admin || !selectedStudentId;
+    $("timetableRequestsPanel").hidden = !authUser || (parent && !selectedStudentId);
+    $("requestTimetableChangeBtn").hidden = !isStudentAccount();
     $("timetableIntro").textContent = admin ? "Edit the selected student's timetable here. Changes save to their account." : parent ? "View the selected student's timetable. The admin manages schedules." : isStudentAccount() ? "The admin manages this timetable. Use your student account to log what you study." : "Set the sessions you want to make time for. You can change your plan whenever life changes.";
     $("studentPicker").hidden = !parent || linkedStudents.length === 0;
     if (parent && linkedStudents.length) {
@@ -303,6 +558,7 @@
       picker.replaceChildren(...linkedStudents.map((student) => { const option = document.createElement("option"); option.value = student.id; option.textContent = student.display_name; return option; }));
       picker.value = selectedStudentId || linkedStudents[0].id;
     }
+    updateReminderControls(); renderTimetableRequests();
     setCloudStatus(authUser ? (admin ? "Admin view: linked study logs are read-only; you can manage student timetables." : parent ? "Parent view: linked study logs are read-only." : "Study data is syncing to your account.") : "Study data stays on this device until you sign in.");
   }
   function renderLinkedStudentsList() {
@@ -365,6 +621,22 @@
     if (error) throw error;
     return (data || []).map(fromRemoteLog);
   }
+  async function loadStudentExtras(studentId) {
+    let setupMissing = false;
+    const { data: reviews, error: reviewsError } = await supabaseClient.from("study_log_reviews").select("*").eq("student_id", studentId).order("updated_at", { ascending: false });
+    if (reviewsError) { logReviews = []; setupMissing = true; }
+    else logReviews = reviews || [];
+    const { data: requests, error: requestsError } = await supabaseClient.from("study_timetable_requests").select("*").eq("student_id", studentId).order("created_at", { ascending: false });
+    if (requestsError) { timetableRequests = []; setupMissing = true; }
+    else timetableRequests = requests || [];
+    if (setupMissing) setCloudStatus("For parent reviews and timetable requests, run the latest Studywell setup SQL in Supabase.");
+    return !setupMissing;
+  }
+  async function fetchTimetableRequests(studentId) {
+    const { data, error } = await supabaseClient.from("study_timetable_requests").select("*").eq("student_id", studentId).order("created_at", { ascending: false });
+    if (error) throw error;
+    return data || [];
+  }
   async function syncStudentDisplayName() {
     if (!isStudentAccount()) return;
     const { error } = await supabaseClient.rpc("update_my_display_name", { p_display_name: state.name || "Student" });
@@ -425,8 +697,9 @@
       await uploadStudentLogs(state.logs);
       if (importingFirstLocalUse) localStorage.setItem(LOCAL_MIGRATION_KEY, authUser.id);
       state.logs = await fetchStudentLogs(authUser.id);
+      const extrasReady = await loadStudentExtras(authUser.id);
       saveState();
-      setCloudStatus("Study logs and timetable are synced.");
+      if (extrasReady) setCloudStatus("Study logs and timetable are synced.");
     } catch (error) {
       saveState();
       setCloudStatus("Could not reach the cloud. Your local study data is saved and will retry next sign-in.");
@@ -441,6 +714,7 @@
     if (!ids.length) {
       linkedStudents = []; selectedStudentId = null;
       state = { ...defaultState, name: accountProfile.display_name || (isAdminAccount() ? "Admin" : "Parent"), schedule: [], logs: [], activeTimer: null };
+      logReviews = []; timetableRequests = [];
       return;
     }
     const { data: profiles, error: profileError } = await supabaseClient.from("study_profiles").select("id,display_name,timetable").in("id", ids);
@@ -455,7 +729,8 @@
     state = { ...defaultState, name: student.display_name || "Student", schedule: Array.isArray(student.timetable) ? student.timetable : [], logs: [], activeTimer: null };
     try { state.logs = await fetchStudentLogs(student.id); setCloudStatus(`Viewing ${student.display_name}'s synced study logs.`); }
     catch (error) { setCloudStatus("Could not load this student's cloud logs."); }
-    renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
+    await loadStudentExtras(student.id);
+    renderTimetableRequests(); renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
   }
   async function refreshParentStudents() {
     if (!isParentView()) return;
@@ -469,7 +744,7 @@
   }
   async function handleAuthSession(session) {
     if (!session) {
-      authUser = null; accountProfile = null; linkedStudents = []; selectedStudentId = null; state = loadState();
+      authUser = null; accountProfile = null; linkedStudents = []; selectedStudentId = null; logReviews = []; timetableRequests = []; state = loadState();
       renderCloudControls(); renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
       return;
     }
@@ -548,6 +823,11 @@
   document.querySelectorAll(".auth-mode").forEach((button) => button.addEventListener("click", () => setAccountMode(button.dataset.mode)));
   $("accountSubmit").addEventListener("click", () => void submitAccountForm());
   $("applyTimetablePresetBtn").addEventListener("click", () => void applyTimetablePreset());
+  $("printReportBtn").addEventListener("click", printStudyReport);
+  $("requestTimetableChangeBtn").addEventListener("click", openTimetableRequestDialog);
+  $("timetableRequestForm").addEventListener("submit", (event) => void submitTimetableChangeRequest(event));
+  $("reviewForm").addEventListener("submit", (event) => void saveLogReview(event));
+  $("reminderToggleBtn").addEventListener("click", () => void toggleStudyReminders());
   $("createInviteBtn").addEventListener("click", () => void createInviteCode());
   $("refreshStudentsBtn").addEventListener("click", () => void refreshParentStudents());
   $("refreshAdminStudentsBtn").addEventListener("click", () => void refreshParentStudents());
@@ -564,6 +844,12 @@
   $("studentPicker").addEventListener("change", async (event) => {
     selectedStudentId = event.target.value;
     await loadSelectedStudent(); renderCloudControls(); renderOverview();
+  });
+  $("historyList").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-review-log]"); if (button) openReviewDialog(button.dataset.reviewLog);
+  });
+  $("timetableRequestList").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-request-status]"); if (button) void reviewTimetableChangeRequest(button.dataset.requestId, button.dataset.requestStatus);
   });
   $("accountDialog").addEventListener("click", (event) => { if (event.target === $("accountDialog") || event.target.closest("[data-close-account]")) $("accountDialog").close(); });
   document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => $(button.dataset.closeDialog).close()));
@@ -591,6 +877,8 @@
     if (action === "view-log") { const log = state.logs.find((item) => item.id === button.dataset.id); if (log) openLogDialog({ log }); return; }
     const session = state.schedule.find((item) => item.id === button.dataset.id); if (!session) return;
     if (action === "finish") return finishTimer(session);
+    if (action === "pause") return pauseTimer(session);
+    if (action === "resume") return resumeTimer(session);
     if (isDue(session, todayISO())) return openLogDialog({ session });
     startTimer(session);
   });
@@ -617,7 +905,7 @@
   $("nameForm").addEventListener("submit", (event) => { if (event.submitter?.value === "cancel") return; event.preventDefault(); state.name = $("nameInput").value.trim() || "Student"; saveState(); if (isStudentAccount()) void syncStudentDisplayName(); $("nameDialog").close(); renderOverview(); showToast("Profile name updated"); });
   ["sessionDialog", "logDialog", "nameDialog"].forEach((id) => $(id).addEventListener("click", (event) => { if (event.target === $(id)) $(id).close(); }));
   document.addEventListener("click", (event) => { const go = event.target.closest("[data-go]"); if (go && go.closest(".page-view")) navigate(go.dataset.go); });
-  if (state.activeTimer) { timerInterval = setInterval(() => { updateTimerText(); renderToday(); }, 1000); }
   renderOverview();
-  void initializeCloud();
+  window.setInterval(() => { if (!state.activeTimer) renderOverview(); checkStudyReminders(); }, 30000);
+  void initializeCloud().finally(ensureTimerLoop);
 })();
