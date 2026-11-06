@@ -198,7 +198,7 @@
         const stopped = Boolean(state.activeTimer.autoStoppedAt || state.activeTimer.manualStopped);
         const paused = Boolean(state.activeTimer.pausedAt);
         statusClass = "status-live";
-        action = `<span class="timer-controls"><span class="timer-clock ${paused || stopped ? "timer-paused" : ""}">${formatElapsed()}</span>${stopped ? `<button class="timer-control" data-action="finish" data-id="${escapeHTML(session.id)}">Log</button>` : `<button class="timer-control" data-action="${paused ? "resume" : "pause"}" data-id="${escapeHTML(session.id)}">${paused ? "Resume" : "Pause"}</button><button class="timer-control timer-finish" data-action="finish" data-id="${escapeHTML(session.id)}">Finish</button>`}</span>`;
+        action = `<span class="timer-controls"><span class="timer-clock ${paused || stopped ? "timer-paused" : ""}">${formatElapsed()}</span>${stopped ? `<button class="timer-control" data-action="finish" data-id="${escapeHTML(session.id)}">Log</button>` : paused ? `<button class="timer-control" data-action="resume" data-id="${escapeHTML(session.id)}">Resume</button>` : ""}</span>`;
       }
       else if (log) { statusClass = `status-${log.status === "completed" ? "done" : log.status}`; action = `<button class="session-action done-action" data-action="view-log" data-id="${escapeHTML(log.id)}">${log.status === "missed" ? "Missed" : `${durationCompact(log.minutes)} · ${log.status === "partial" ? "Partial" : "Logged"}`}</button>`; }
       else if (remoteTimer) {
