@@ -53,6 +53,9 @@
   let linkedStudents = [];
   let selectedStudentId = null;
   let timerSessions = [];
+  let appUsageRows = [];
+  let lastAppUsageSyncAt = 0;
+  let appUsageSyncPending = false;
   let logReviews = [];
   let timetableRequests = [];
   let makeupRequestLog = null;
@@ -329,7 +332,8 @@
     const rows = logs.map((log) => {
       const reportStudentId = selectedStudentId || authUser?.id;
       const reviewComments = logReviews.filter((review) => review.student_id === reportStudentId && review.log_id === log.id && review.comment).map((review) => review.comment).join(" · ");
-      return `<tr><td>${escapeHTML(formatDate(fromISO(log.date), { month: "short", day: "numeric", year: "numeric" }))}</td><td>${escapeHTML(log.subject)}</td><td>${escapeHTML(log.topic)}${log.whatLearned ? `<small>Learned: ${escapeHTML(log.whatLearned)}</small>` : ""}${log.notUnderstood ? `<small>Needs help: ${escapeHTML(log.notUnderstood)}</small>` : ""}${reviewComments ? `<small>Parent review: ${escapeHTML(reviewComments)}</small>` : ""}</td><td>${escapeHTML(durationLabel(log.minutes))}</td><td>${escapeHTML(topicProgressLabel(log.topicProgress))}</td><td>${escapeHTML(log.status)}</td></tr>`;
+      const usage = appUsageRows.filter((row) => row.session_id === log.sessionId && row.study_date === log.date).sort((a, b) => Number(b.foreground_seconds) - Number(a.foreground_seconds)).map((row) => `${row.app_name} ${durationLabel(Math.round(Number(row.foreground_seconds) / 60))}`).join(", ");
+      return `<tr><td>${escapeHTML(formatDate(fromISO(log.date), { month: "short", day: "numeric", year: "numeric" }))}</td><td>${escapeHTML(log.subject)}</td><td>${escapeHTML(log.topic)}${log.whatLearned ? `<small>Learned: ${escapeHTML(log.whatLearned)}</small>` : ""}${log.notUnderstood ? `<small>Needs help: ${escapeHTML(log.notUnderstood)}</small>` : ""}${usage ? `<small>Phone app use: ${escapeHTML(usage)}</small>` : ""}${reviewComments ? `<small>Parent review: ${escapeHTML(reviewComments)}</small>` : ""}</td><td>${escapeHTML(durationLabel(log.minutes))}</td><td>${escapeHTML(topicProgressLabel(log.topicProgress))}</td><td>${escapeHTML(log.status)}</td></tr>`;
     }).join("");
     const rangeLabel = `${formatDate(start, { month: "long", day: "numeric", year: "numeric" })} – ${formatDate(end, { month: "long", day: "numeric", year: "numeric" })}`;
     reportWindow.document.open();
@@ -440,7 +444,7 @@
         reflectionMarkup("What I didn’t understand properly", log.notUnderstood),
       ].join("");
       const missedFollowup = isStudentAccount() && log.status === "missed" && log.sessionId ? `<button class="button button-quiet missed-followup-button" data-makeup-log="${escapeHTML(log.id)}">Request a make-up</button>` : "";
-      return `<article class="history-card"><div class="history-card-top"><div class="history-subject"><div class="subject-badge color-${(log.subject.charCodeAt(0) || 0) % 4}">${escapeHTML(log.subject.trim().charAt(0).toUpperCase())}</div><div><strong>${escapeHTML(log.subject)}</strong><span>${formatDate(fromISO(log.date), { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div></div><span class="duration-pill">${durationSummary}</span></div><div class="history-topic">${escapeHTML(log.topic)}</div>${reflections ? `<div class="history-reflections">${reflections}</div>` : ""}${log.notes ? `<div class="history-notes"><strong>Next step or other notes</strong><p>${escapeHTML(log.notes)}</p></div>` : ""}${renderLogReviews(log)}<div class="history-foot"><span>${log.plannedStart ? `Planned ${formatTime(log.plannedStart)}${log.plannedEnd ? `–${formatTime(log.plannedEnd)}` : ""}` : "Independent study"}</span><span class="topic-progress-pill">${topicProgressLabel(log.topicProgress)}</span><span class="status-pill ${log.status === "partial" ? "partial" : ""}">${log.status === "partial" ? "Partly completed" : log.status === "missed" ? "Missed session" : log.sessionId ? "Completed as planned" : "Study logged"}</span>${missedFollowup}</div></article>`;
+      return `<article class="history-card"><div class="history-card-top"><div class="history-subject"><div class="subject-badge color-${(log.subject.charCodeAt(0) || 0) % 4}">${escapeHTML(log.subject.trim().charAt(0).toUpperCase())}</div><div><strong>${escapeHTML(log.subject)}</strong><span>${formatDate(fromISO(log.date), { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div></div><span class="duration-pill">${durationSummary}</span></div><div class="history-topic">${escapeHTML(log.topic)}</div>${reflections ? `<div class="history-reflections">${reflections}</div>` : ""}${phoneUsageMarkup(log)}${log.notes ? `<div class="history-notes"><strong>Next step or other notes</strong><p>${escapeHTML(log.notes)}</p></div>` : ""}${renderLogReviews(log)}<div class="history-foot"><span>${log.plannedStart ? `Planned ${formatTime(log.plannedStart)}${log.plannedEnd ? `–${formatTime(log.plannedEnd)}` : ""}` : "Independent study"}</span><span class="topic-progress-pill">${topicProgressLabel(log.topicProgress)}</span><span class="status-pill ${log.status === "partial" ? "partial" : ""}">${log.status === "partial" ? "Partly completed" : log.status === "missed" ? "Missed session" : log.sessionId ? "Completed as planned" : "Study logged"}</span>${missedFollowup}</div></article>`;
     }).join("");
   }
   function navigate(view) {
@@ -601,6 +605,8 @@
         catch (_) { timerSessions = []; }
       }
       const remote = await fetchStudentLogs(studentId);
+      try { appUsageRows = await fetchStudentAppUsage(studentId); }
+      catch (_) { appUsageRows = []; }
       const remoteIds = new Set(remote.map((log) => log.id));
       const remoteOccurrences = new Set(remote.filter((log) => log.sessionId).map((log) => `${log.sessionId}|${log.date}`));
       const mergedRemote = remote.map((remoteLog) => {
@@ -614,6 +620,7 @@
       state.logs = [...mergedRemote, ...pendingLocal];
       if (isStudentAccount()) saveState();
       renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
+      if (isStudentAccount()) void syncPhoneAppUsage(false);
     } catch (_) { /* The next refresh will retry. */ }
   }
   function updateLogStatusFields() {
@@ -728,7 +735,7 @@
       picker.replaceChildren(...linkedStudents.map((student) => { const option = document.createElement("option"); option.value = student.id; option.textContent = student.display_name; return option; }));
       picker.value = selectedStudentId || linkedStudents[0].id;
     }
-    updateReminderControls(); renderTimetableRequests();
+    updateReminderControls(); updatePhoneUsageControls(); renderTimetableRequests();
     setCloudStatus(authUser ? (admin ? "Admin view: linked study logs are read-only; you can manage student timetables." : parent ? "Parent view: linked study logs are read-only." : "Study data is syncing to your account.") : "Study data stays on this device until you sign in.");
   }
   function renderLinkedStudentsList() {
@@ -797,6 +804,75 @@
     if (error) throw error;
     return data || [];
   }
+  async function fetchStudentAppUsage(studentId) {
+    const firstDate = new Date(); firstDate.setDate(firstDate.getDate() - 30);
+    const { data, error } = await supabaseClient.from("study_app_usage_reports").select("*")
+      .eq("student_id", studentId).gte("study_date", toISO(firstDate)).order("study_date", { ascending: false });
+    if (error) throw error;
+    return data || [];
+  }
+  async function syncPhoneAppUsage(force = false) {
+    if (!supabaseClient || !isStudentAccount() || !window.StudywellPhone || appUsageSyncPending) return;
+    if (!window.StudywellPhone.hasUsageAccess()) { updatePhoneUsageControls(); return; }
+    if (!force && Date.now() - lastAppUsageSyncAt < 5 * 60 * 1000) return;
+    appUsageSyncPending = true; lastAppUsageSyncAt = Date.now();
+    try {
+      const since = new Date(); since.setDate(since.getDate() - 2);
+      const { data: sessions, error } = await supabaseClient.from("study_timer_sessions")
+        .select("session_id,study_date,planned_start_at,planned_end_at")
+        .eq("student_id", authUser.id).gte("study_date", toISO(since));
+      if (error) throw error;
+      const rows = [];
+      for (const session of sessions || []) {
+        const startAt = Date.parse(session.planned_start_at);
+        const endAt = Math.min(Date.now(), Date.parse(session.planned_end_at));
+        if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || endAt <= startAt) continue;
+        const result = JSON.parse(window.StudywellPhone.readAppUsage(startAt, endAt) || "{}");
+        for (const app of result.apps || []) {
+          const seconds = Math.floor(Number(app.foregroundSeconds) || 0);
+          if (seconds < 1 || !app.packageName) continue;
+          rows.push({ student_id: authUser.id, study_date: session.study_date, session_id: session.session_id,
+            package_name: app.packageName, app_name: app.appName || app.packageName, foreground_seconds: seconds, updated_at: new Date().toISOString() });
+        }
+      }
+      if (rows.length) {
+        const { error: uploadError } = await supabaseClient.from("study_app_usage_reports").upsert(rows, { onConflict: "student_id,study_date,session_id,package_name" });
+        if (uploadError) throw uploadError;
+      }
+      appUsageRows = await fetchStudentAppUsage(authUser.id);
+      updatePhoneUsageControls();
+      if ($("historyView").classList.contains("active")) renderHistory();
+    } catch (error) {
+      const status = $("phoneUsageStatus");
+      if (status) status.textContent = String(error?.message || "").includes("study_app_usage_reports")
+        ? "Run the latest Studywell database setup SQL to enable app-use reports."
+        : "App-use report will sync when Studywell is online.";
+    } finally { appUsageSyncPending = false; }
+  }
+  function phoneUsageMarkup(log) {
+    if (!log.sessionId) return "";
+    const rows = appUsageRows.filter((row) => row.session_id === log.sessionId && row.study_date === log.date)
+      .sort((a, b) => Number(b.foreground_seconds) - Number(a.foreground_seconds));
+    if (!rows.length) return "";
+    return `<div class="history-app-usage"><strong>Phone apps used during this lesson</strong><div>${rows.map((row) => `<span>${escapeHTML(row.app_name)} · ${durationLabel(Math.round(Number(row.foreground_seconds) / 60))}</span>`).join("")}</div></div>`;
+  }
+  function updatePhoneUsageControls() {
+    const button = $("phoneUsageButton"), status = $("phoneUsageStatus");
+    if (!button || !status) return;
+    if (!window.StudywellPhone) {
+      button.hidden = true;
+      status.innerHTML = `Phone app-use reports require the Studywell Android app on the student's Samsung phone. <a href="https://github.com/michael-yugi/study-well-tracking/actions/workflows/android.yml" target="_blank" rel="noopener">Open Android app builds</a>.`;
+      return;
+    }
+    button.hidden = false;
+    const allowed = window.StudywellPhone.hasUsageAccess();
+    button.textContent = allowed ? "Sync app-use report" : "Enable app-use reporting";
+    status.textContent = allowed ? "Usage access is enabled. App names and time are summarized for scheduled lesson periods." : "Enable Usage Access on this phone to share app names and time during study sessions.";
+  }
+  window.onStudywellPhoneReady = () => {
+    updatePhoneUsageControls();
+    if (document.visibilityState === "visible" && isStudentAccount()) void syncPhoneAppUsage(true);
+  };
   function timerSessionElapsedSeconds(timer, now = Date.now()) {
     let seconds = Math.max(0, Number(timer.focused_seconds) || 0);
     if (timer.status === "running" && timer.last_started_at) {
@@ -895,6 +971,7 @@
   }
   async function loadStudentAccountState() {
     timerSessions = [];
+    appUsageRows = [];
     let saved = readCachedUserState(authUser.id);
     let importingFirstLocalUse = false;
     if (!saved && !localStorage.getItem(LOCAL_MIGRATION_KEY)) {
@@ -916,8 +993,11 @@
         restoreStudentTimerSession(timers);
       } catch (_) { /* Keep the locally cached timer if the timer table cannot be reached. */ }
       const extrasReady = await loadStudentExtras(authUser.id);
+      try { appUsageRows = await fetchStudentAppUsage(authUser.id); } catch (_) { appUsageRows = []; }
       saveState();
       ensureTimerLoop();
+      updatePhoneUsageControls();
+      void syncPhoneAppUsage(false);
       if (extrasReady) setCloudStatus("Study logs and timetable are synced.");
     } catch (error) {
       saveState();
@@ -932,7 +1012,7 @@
     const ids = (links || []).map((link) => link.student_id);
     if (!ids.length) {
       linkedStudents = []; selectedStudentId = null;
-      timerSessions = [];
+      timerSessions = []; appUsageRows = [];
       state = { ...defaultState, name: accountProfile.display_name || (isAdminAccount() ? "Admin" : "Parent"), schedule: [], logs: [], activeTimer: null };
       logReviews = []; timetableRequests = [];
       return;
@@ -945,7 +1025,7 @@
   }
   async function loadSelectedStudent() {
     const student = linkedStudents.find((item) => item.id === selectedStudentId);
-    timerSessions = [];
+    timerSessions = []; appUsageRows = [];
     if (!student) return;
     state = { ...defaultState, name: student.display_name || "Student", schedule: Array.isArray(student.timetable) ? student.timetable : [], logs: [], activeTimer: null, weeklyGoalMinutes: Number(student.weekly_goal_minutes) || 300 };
     try { state.logs = await fetchStudentLogs(student.id); }
@@ -954,6 +1034,7 @@
       timerSessions = await fetchStudentTimerSessions(student.id);
       setCloudStatus(`Viewing ${student.display_name}'s synced study logs and live timer.`);
     } catch (_) { setCloudStatus("Study logs loaded; could not load this student's live timer."); }
+    try { appUsageRows = await fetchStudentAppUsage(student.id); } catch (_) { appUsageRows = []; }
     await loadStudentExtras(student.id);
     renderTimetableRequests(); renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
   }
@@ -969,7 +1050,7 @@
   }
   async function handleAuthSession(session) {
     if (!session) {
-      authUser = null; accountProfile = null; linkedStudents = []; selectedStudentId = null; timerSessions = []; logReviews = []; timetableRequests = []; state = loadState();
+      authUser = null; accountProfile = null; linkedStudents = []; selectedStudentId = null; timerSessions = []; appUsageRows = []; logReviews = []; timetableRequests = []; state = loadState();
       renderCloudControls(); renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
       return;
     }
@@ -1056,6 +1137,11 @@
   $("timetableRequestForm").addEventListener("submit", (event) => void submitTimetableChangeRequest(event));
   $("reviewForm").addEventListener("submit", (event) => void saveLogReview(event));
   $("reminderToggleBtn").addEventListener("click", () => void toggleStudyReminders());
+  $("phoneUsageButton").addEventListener("click", () => {
+    if (!window.StudywellPhone) return;
+    if (!window.StudywellPhone.hasUsageAccess()) { window.StudywellPhone.openUsageAccessSettings(); return; }
+    void syncPhoneAppUsage(true);
+  });
   $("createInviteBtn").addEventListener("click", () => void createInviteCode());
   $("refreshStudentsBtn").addEventListener("click", () => void refreshParentStudents());
   $("refreshAdminStudentsBtn").addEventListener("click", () => void refreshParentStudents());
@@ -1084,6 +1170,7 @@
   $("accountDialog").addEventListener("click", (event) => { if (event.target === $("accountDialog") || event.target.closest("[data-close-account]")) $("accountDialog").close(); });
   document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => $(button.dataset.closeDialog).close()));
   window.addEventListener("online", () => { if (isStudentAccount()) void uploadStudentLogs(state.logs).catch(() => setCloudStatus("Offline changes are saved; cloud sync will retry.")); });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && isStudentAccount()) void syncPhoneAppUsage(true); });
   $("scheduleList").addEventListener("click", async (event) => {
     const add = event.target.closest(".add-day-session"); if (add && canEditTimetable()) return openSessionDialog(null, Number(add.dataset.day));
     if (event.target.closest("#emptyAddBtn") && canEditTimetable()) return openSessionDialog();

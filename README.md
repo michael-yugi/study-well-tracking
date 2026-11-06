@@ -25,6 +25,14 @@ A timetable-based study tracker for students, parents/guardians, and an admin. T
 - A streak counts consecutive calendar days with recorded focused study time.
 - From a missed session in the Study log, the student can request a make-up date and time and explain why they missed it. The admin can approve or decline.
 
+## Android app-use reports
+
+The `android` folder contains a Samsung/Android companion app that opens Studywell and can read Android foreground-app usage after the student explicitly enables **Usage Access** in phone Settings. It records app names and foreground time only within timetable blocks for which a Studywell timer was started; it does not read messages, page contents, or keystrokes. The student can turn off Usage Access in Android Settings at any time.
+
+When the student opens or returns to the companion app with an internet connection, it syncs the recent app-use summary to Supabase. Parents and the admin can see the app names and minutes under the matching session in **Study log**. Reports may arrive after the student returns to Studywell, since Android can pause the website while another app is in front.
+
+Run the current `supabase-setup.sql` once more to create the private app-use report table and its student/guardian access rules. The GitHub Actions workflow builds a debug APK when Android files change; download the `studywell-android-debug` artifact from the repository's **Actions** page. Install the APK on each student's phone, sign in with that student's Studywell account, open the account dialog, choose **Enable app-use reporting**, and allow Studywell under Android's Usage Access settings. Parents see the report on each matching entry in **Study log**. Android may pause Studywell while another app is open, so the report syncs when the student returns to the companion app with internet access.
+
 ## Database setup
 
 Run the current `supabase-setup.sql` in the project’s Supabase SQL Editor. It is safe to rerun and keeps existing profiles and study logs. It updates the database for multiple guardians, timers, goals, requests, missed-session automation, and reminder scheduling.

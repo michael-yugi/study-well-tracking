@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=6" />
+    <link rel="stylesheet" href="styles.css?v=7" />
   </head>
   <body>
     <div class="app-shell">
@@ -125,7 +125,7 @@
         <p class="account-hint" id="signedInSummary"></p>
         <div id="adminTools" hidden><p class="account-hint">The admin can view every linked student and manage timetables. A Parent account creates each student link code; choose a linked student from the menu at the top of the page.</p><button class="button button-quiet refresh-students-button" id="refreshAdminStudentsBtn">Refresh student list</button></div>
         <div id="parentTools" hidden><p class="account-hint" id="parentToolsIntro">Create a separate one-time code for each student. Each linked student keeps an independent timetable and study log.</p><button class="button button-dark" id="createInviteBtn">Create student link code</button><button class="button button-quiet refresh-students-button" id="refreshStudentsBtn">Refresh student list</button><div class="invite-code-box" id="inviteCodeBox" hidden><span>Share this one-time code with the student:</span><strong id="inviteCodeText"></strong><button class="button button-quiet" id="copyInviteBtn">Copy code</button></div><div class="linked-students" id="linkedStudentsList"></div></div>
-        <div id="studentTools" hidden><label class="field-label" for="parentCodeInput">Parent / guardian link code</label><input class="field-input" id="parentCodeInput" maxlength="32" autocomplete="off" placeholder="Paste a code from a parent or guardian" /><button class="button button-dark redeem-button" id="redeemInviteBtn">Link parent / guardian</button><p class="account-hint">Each parent or guardian creates their own one-time code. You can link several caregivers; each can sign in with their own account to view your logs.</p><button class="button button-quiet" id="reminderToggleBtn">Enable study reminders</button><p class="account-hint" id="reminderStatus">Reminders appear while Studywell is open.</p></div>
+        <div id="studentTools" hidden><label class="field-label" for="parentCodeInput">Parent / guardian link code</label><input class="field-input" id="parentCodeInput" maxlength="32" autocomplete="off" placeholder="Paste a code from a parent or guardian" /><button class="button button-dark redeem-button" id="redeemInviteBtn">Link parent / guardian</button><p class="account-hint">Each parent or guardian creates their own one-time code. You can link several caregivers; each can sign in with their own account to view your logs.</p><button class="button button-quiet" id="reminderToggleBtn">Enable study reminders</button><p class="account-hint" id="reminderStatus">Reminders appear while Studywell is open.</p><p class="account-hint" id="phoneUsageStatus">Phone app-use reports require the Studywell Android app on the student's Samsung phone.</p><button class="button button-quiet" id="phoneUsageButton" hidden>Enable app-use reporting</button></div>
         <p class="form-error" id="linkError" role="alert"></p><div class="modal-actions"><button class="button button-quiet" id="signOutBtn">Sign out</button></div>
       </section>
     </dialog>
@@ -139,6 +139,6 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="supabase-config.js?v=2"></script>
-    <script src="app.js?v=11"></script>
+    <script src="app.js?v=12"></script>
   </body>
 </html>

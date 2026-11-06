@@ -99,6 +99,20 @@ create table if not exists public.study_timer_sessions (
 create index if not exists study_timer_sessions_due_idx
   on public.study_timer_sessions (planned_end_at, status);
 
+create table if not exists public.study_app_usage_reports (
+  student_id uuid not null references public.study_profiles(id) on delete cascade,
+  study_date date not null,
+  session_id text not null,
+  package_name text not null,
+  app_name text not null,
+  foreground_seconds integer not null check (foreground_seconds between 1 and 86400),
+  updated_at timestamptz not null default now(),
+  primary key (student_id, study_date, session_id, package_name)
+);
+
+create index if not exists study_app_usage_reports_student_date_idx
+  on public.study_app_usage_reports (student_id, study_date desc);
+
 create table if not exists public.study_push_subscriptions (
   endpoint text primary key,
   student_id uuid not null references public.study_profiles(id) on delete cascade,
@@ -748,16 +762,18 @@ alter table public.study_logs enable row level security;
 alter table public.study_log_reviews enable row level security;
 alter table public.study_timetable_requests enable row level security;
 alter table public.study_timer_sessions enable row level security;
+alter table public.study_app_usage_reports enable row level security;
 alter table public.study_push_subscriptions enable row level security;
 alter table public.study_reminder_queue enable row level security;
 
-revoke all on table public.study_profiles, public.study_access, public.study_invites, public.study_logs, public.study_log_reviews, public.study_timetable_requests, public.study_timer_sessions, public.study_push_subscriptions, public.study_reminder_queue from public, anon, authenticated;
+revoke all on table public.study_profiles, public.study_access, public.study_invites, public.study_logs, public.study_log_reviews, public.study_timetable_requests, public.study_timer_sessions, public.study_app_usage_reports, public.study_push_subscriptions, public.study_reminder_queue from public, anon, authenticated;
 grant select on table public.study_profiles to authenticated;
 grant select on table public.study_access to authenticated;
 grant select, insert, update, delete on table public.study_logs to authenticated;
 grant select, insert, update on table public.study_log_reviews to authenticated;
 grant select, insert on table public.study_timetable_requests to authenticated;
 grant select on table public.study_timer_sessions to authenticated;
+grant select, insert, update on table public.study_app_usage_reports to authenticated;
 grant select, insert, update, delete on table public.study_push_subscriptions to authenticated;
 
 drop policy if exists "Read own or linked profiles" on public.study_profiles;
@@ -887,6 +903,33 @@ create policy "Read accessible timer sessions"
         and (a.parent_id = (select auth.uid()) or (select public.is_studywell_admin()))
     )
   );
+
+drop policy if exists "Students read own app usage reports" on public.study_app_usage_reports;
+create policy "Students read own app usage reports"
+  on public.study_app_usage_reports for select to authenticated
+  using (student_id = (select auth.uid()) and (select public.is_studywell_student()));
+
+drop policy if exists "Linked caregivers read app usage reports" on public.study_app_usage_reports;
+create policy "Linked caregivers read app usage reports"
+  on public.study_app_usage_reports for select to authenticated
+  using (
+    exists (
+      select 1 from public.study_access a
+      where a.student_id = study_app_usage_reports.student_id
+        and (a.parent_id = (select auth.uid()) or (select public.is_studywell_admin()))
+    )
+  );
+
+drop policy if exists "Students add own app usage reports" on public.study_app_usage_reports;
+create policy "Students add own app usage reports"
+  on public.study_app_usage_reports for insert to authenticated
+  with check (student_id = (select auth.uid()) and (select public.is_studywell_student()));
+
+drop policy if exists "Students update own app usage reports" on public.study_app_usage_reports;
+create policy "Students update own app usage reports"
+  on public.study_app_usage_reports for update to authenticated
+  using (student_id = (select auth.uid()) and (select public.is_studywell_student()))
+  with check (student_id = (select auth.uid()) and (select public.is_studywell_student()));
 
 drop policy if exists "Students manage own push subscriptions" on public.study_push_subscriptions;
 create policy "Students manage own push subscriptions"
