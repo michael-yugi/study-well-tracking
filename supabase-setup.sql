@@ -416,6 +416,37 @@ begin
 end;
 $$;
 
+-- A lesson accidentally finished before its planned end can be resumed once.
+-- The recorded focused seconds are kept, and tracking continues until lesson end.
+create or replace function public.resume_finished_study_timer(p_session_id text, p_study_date date)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user uuid := (select auth.uid());
+  v_timer public.study_timer_sessions%rowtype;
+begin
+  if v_user is null or not (select public.is_studywell_student()) then
+    raise exception 'Sign in with a student account first';
+  end if;
+
+  select * into v_timer from public.study_timer_sessions
+    where student_id = v_user and session_id = p_session_id and study_date = p_study_date for update;
+  if not found then raise exception 'No saved timer was found for this lesson'; end if;
+  if v_timer.status <> 'finished' then raise exception 'Only a lesson finished early can be resumed'; end if;
+  if now() >= v_timer.planned_end_at then raise exception 'The planned lesson end has passed'; end if;
+  if exists (
+    select 1 from public.study_logs
+    where student_id = v_user and session_id = p_session_id and study_date = p_study_date
+  ) then raise exception 'This lesson already has a saved study log'; end if;
+
+  update public.study_timer_sessions set status = 'running', last_started_at = now(), updated_at = now()
+    where student_id = v_user and session_id = p_session_id and study_date = p_study_date;
+end;
+$$;
+
 create or replace function public.finalize_and_mark_missed_study_sessions()
 returns integer
 language plpgsql
@@ -879,6 +910,8 @@ revoke all on function public.update_my_time_zone(text) from public, anon, authe
 grant execute on function public.update_my_time_zone(text) to authenticated;
 revoke all on function public.record_study_timer(text, date, text) from public, anon, authenticated;
 grant execute on function public.record_study_timer(text, date, text) to authenticated;
+revoke all on function public.resume_finished_study_timer(text, date) from public, anon, authenticated;
+grant execute on function public.resume_finished_study_timer(text, date) to authenticated;
 revoke all on function public.finalize_and_mark_missed_study_sessions() from public, anon, authenticated;
 revoke all on function public.enqueue_study_reminders() from public, anon, authenticated;
 revoke all on function public.enforce_study_timer_log_results() from public, anon, authenticated;

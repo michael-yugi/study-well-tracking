@@ -129,9 +129,10 @@
   }
   async function persistTimerAction(timer, action) {
     if (!isStudentAccount()) return;
-    const { error } = await supabaseClient.rpc("record_study_timer", {
-      p_session_id: timer.sessionId, p_study_date: timer.date, p_action: action,
-    });
+    const rpcName = action === "resume-finished" ? "resume_finished_study_timer" : "record_study_timer";
+    const params = { p_session_id: timer.sessionId, p_study_date: timer.date };
+    if (rpcName === "record_study_timer") params.p_action = action;
+    const { error } = await supabaseClient.rpc(rpcName, params);
     if (error) throw error;
   }
   function isDue(session, date) {
@@ -197,8 +198,9 @@
       if (active) {
         const stopped = Boolean(state.activeTimer.autoStoppedAt || state.activeTimer.manualStopped);
         const paused = Boolean(state.activeTimer.pausedAt);
+        const canResume = now < timerEndAt(state.activeTimer, session) && (paused || state.activeTimer.manualStopped);
         statusClass = "status-live";
-        action = `<span class="timer-controls"><span class="timer-clock ${paused || stopped ? "timer-paused" : ""}">${formatElapsed()}</span>${stopped ? `<button class="timer-control" data-action="finish" data-id="${escapeHTML(session.id)}">Log</button>` : paused ? `<button class="timer-control" data-action="resume" data-id="${escapeHTML(session.id)}">Resume</button>` : ""}</span>`;
+        action = `<span class="timer-controls"><span class="timer-clock ${paused || stopped ? "timer-paused" : ""}">${formatElapsed()}</span>${canResume ? `<button class="timer-control" data-action="resume" data-id="${escapeHTML(session.id)}">Resume timer</button>` : stopped ? `<button class="timer-control" data-action="finish" data-id="${escapeHTML(session.id)}">Log</button>` : ""}</span>`;
       }
       else if (log) { statusClass = `status-${log.status === "completed" ? "done" : log.status}`; action = `<button class="session-action done-action" data-action="view-log" data-id="${escapeHTML(log.id)}">${log.status === "missed" ? "Missed" : `${durationCompact(log.minutes)} · ${log.status === "partial" ? "Partial" : "Logged"}`}</button>`; }
       else if (remoteTimer) {
@@ -511,12 +513,12 @@
     saveState(); updateTimerText(); renderOverview(); showToast("Timer paused");
   }
   async function resumeTimer(session) {
-    const timer = state.activeTimer; if (!timer || !timer.pausedAt || timer.autoStoppedAt || timer.manualStopped) return;
+    const timer = state.activeTimer; if (!timer || (!timer.pausedAt && !timer.manualStopped) || timer.autoStoppedAt) return;
     const now = Date.now(); const endAt = timerEndAt(timer, session);
-    if (endAt && now >= endAt) return autoStopTimer(session);
-    try { await persistTimerAction(timer, "resume"); }
+    if (endAt && now >= endAt) { showToast("The planned end has passed; add the lesson notes instead."); renderOverview(); return; }
+    try { await persistTimerAction(timer, timer.manualStopped ? "resume-finished" : "resume"); }
     catch (error) { setCloudStatus(error.message || "Could not sync the resumed timer."); showToast("Resume did not sync; try again"); return; }
-    timer.runningSince = now; timer.pausedAt = null;
+    timer.runningSince = now; timer.pausedAt = null; timer.manualStopped = false; timer.autoStoppedAt = null;
     saveState(); ensureTimerLoop(); renderOverview(); showToast("Timer resumed");
   }
   function timerTick() {
