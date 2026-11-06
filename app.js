@@ -208,7 +208,7 @@
         action = `<span class="session-action done-action" title="Student started at ${escapeHTML(formatTimestampTime(remoteTimer.started_at))}">${timerLabel} · ${durationCompact(timerMinutes)}</span>`;
       }
       else if (isParentView()) { action = `<button class="session-action" disabled>Not logged</button>`; }
-      else if (state.activeTimer) { action = `<button class="session-action" disabled title="Finish the active timer first">Waiting</button>`; }
+      else if (state.activeTimer) { action = `<button class="session-action" disabled title="A timer is already active for another lesson">Another timer</button>`; }
       else if (now < startAt) { action = `<button class="session-action" disabled title="The timer opens at the scheduled start time">Starts ${formatTime(session.start)}</button>`; }
       else if (now >= endAt) { action = `<button class="session-action missed-action" disabled title="Studywell is recording the automatic session result">Saving result…</button>`; }
       else { action = `<button class="session-action" data-action="start-or-log" data-id="${escapeHTML(session.id)}">Start timer</button>`; }
@@ -808,6 +808,29 @@
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
   }
+  function restoreStudentTimerSession(remoteTimers) {
+    const unloggedTimers = remoteTimers.filter((timer) => !getOccurrenceLog(timer.session_id, timer.study_date));
+    const timer = unloggedTimers.find((item) => item.status === "running" || item.status === "paused")
+      || unloggedTimers.filter((item) => item.status === "finished" || item.status === "auto_stopped")
+        .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))[0];
+    if (!timer) { state.activeTimer = null; return; }
+    const plannedStartAt = Date.parse(timer.planned_start_at);
+    const plannedEndAt = Date.parse(timer.planned_end_at);
+    const startedAt = Date.parse(timer.started_at);
+    const lastStartedAt = Date.parse(timer.last_started_at);
+    state.activeTimer = {
+      sessionId: timer.session_id,
+      date: timer.study_date,
+      startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(),
+      runningSince: timer.status === "running" ? (Number.isFinite(lastStartedAt) ? lastStartedAt : Date.now()) : null,
+      accumulatedMs: Math.max(0, Number(timer.focused_seconds) || 0) * 1000,
+      plannedStartAt: Number.isFinite(plannedStartAt) ? plannedStartAt : 0,
+      plannedEndAt: Number.isFinite(plannedEndAt) ? plannedEndAt : 0,
+      pausedAt: timer.status === "paused" ? (Date.parse(timer.updated_at) || Date.now()) : null,
+      autoStoppedAt: timer.status === "auto_stopped" ? (Number.isFinite(plannedEndAt) ? plannedEndAt : Date.now()) : null,
+      manualStopped: timer.status === "finished",
+    };
+  }
   async function loadStudentExtras(studentId) {
     let setupMissing = false;
     const { data: reviews, error: reviewsError } = await supabaseClient.from("study_log_reviews").select("*").eq("student_id", studentId).order("updated_at", { ascending: false });
@@ -886,8 +909,13 @@
       await uploadStudentLogs(state.logs);
       if (importingFirstLocalUse) localStorage.setItem(LOCAL_MIGRATION_KEY, authUser.id);
       state.logs = await fetchStudentLogs(authUser.id);
+      try {
+        const timers = await fetchStudentTimerSessions(authUser.id);
+        restoreStudentTimerSession(timers);
+      } catch (_) { /* Keep the locally cached timer if the timer table cannot be reached. */ }
       const extrasReady = await loadStudentExtras(authUser.id);
       saveState();
+      ensureTimerLoop();
       if (extrasReady) setCloudStatus("Study logs and timetable are synced.");
     } catch (error) {
       saveState();
