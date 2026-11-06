@@ -52,6 +52,7 @@
   let accountProfile = null;
   let linkedStudents = [];
   let selectedStudentId = null;
+  let timerSessions = [];
   let logReviews = [];
   let timetableRequests = [];
   let makeupRequestLog = null;
@@ -190,6 +191,7 @@
     }
     $("todaySessions").innerHTML = sessions.map((session) => {
       const log = getOccurrenceLog(session.id, iso); const active = state.activeTimer?.sessionId === session.id && state.activeTimer.date === iso;
+      const remoteTimer = isParentView() ? timerSessions.find((timer) => timer.session_id === session.id && timer.study_date === iso) : null;
       const startAt = sessionBoundary(session, iso, "start"); const endAt = sessionBoundary(session, iso, "end"); const now = Date.now();
       let action, statusClass = "";
       if (active) {
@@ -199,12 +201,18 @@
         action = `<span class="timer-controls"><span class="timer-clock ${paused || stopped ? "timer-paused" : ""}">${formatElapsed()}</span>${stopped ? `<button class="timer-control" data-action="finish" data-id="${escapeHTML(session.id)}">Log</button>` : `<button class="timer-control" data-action="${paused ? "resume" : "pause"}" data-id="${escapeHTML(session.id)}">${paused ? "Resume" : "Pause"}</button><button class="timer-control timer-finish" data-action="finish" data-id="${escapeHTML(session.id)}">Finish</button>`}</span>`;
       }
       else if (log) { statusClass = `status-${log.status === "completed" ? "done" : log.status}`; action = `<button class="session-action done-action" data-action="view-log" data-id="${escapeHTML(log.id)}">${log.status === "missed" ? "Missed" : `${durationCompact(log.minutes)} · ${log.status === "partial" ? "Partial" : "Logged"}`}</button>`; }
+      else if (remoteTimer) {
+        const timerMinutes = Math.round(timerSessionElapsedSeconds(remoteTimer, now) / 60);
+        const timerLabel = remoteTimer.status === "running" ? "In progress" : remoteTimer.status === "paused" ? "Paused" : "Timer ended";
+        statusClass = remoteTimer.status === "running" ? "status-live" : "status-partial";
+        action = `<span class="session-action done-action" title="Student started at ${escapeHTML(formatTimestampTime(remoteTimer.started_at))}">${timerLabel} · ${durationCompact(timerMinutes)}</span>`;
+      }
       else if (isParentView()) { action = `<button class="session-action" disabled>Not logged</button>`; }
       else if (state.activeTimer) { action = `<button class="session-action" disabled title="Finish the active timer first">Waiting</button>`; }
       else if (now < startAt) { action = `<button class="session-action" disabled title="The timer opens at the scheduled start time">Starts ${formatTime(session.start)}</button>`; }
       else if (now >= endAt) { action = `<button class="session-action missed-action" disabled title="Studywell is recording the automatic session result">Saving result…</button>`; }
       else { action = `<button class="session-action" data-action="start-or-log" data-id="${escapeHTML(session.id)}">Start timer</button>`; }
-      const focus = log ? log.topic : session.focus || "Planned study time";
+      const focus = log ? log.topic : remoteTimer ? `Timer started at ${formatTimestampTime(remoteTimer.started_at)}${remoteTimer.status === "paused" ? " · Paused" : ""}` : session.focus || "Planned study time";
       return `<div class="session-row ${statusClass}"><span class="session-time">${formatTime(session.start)}<br>${formatTime(session.end)}</span><span class="session-line"></span><span class="session-info"><strong class="session-subject">${escapeHTML(session.subject)}</strong><span class="session-focus">${escapeHTML(focus)}</span></span>${action}</div>`;
     }).join("");
   }
@@ -586,6 +594,10 @@
     const studentId = isStudentAccount() ? authUser.id : selectedStudentId;
     if (!studentId) return;
     try {
+      if (isParentView()) {
+        try { timerSessions = await fetchStudentTimerSessions(studentId); }
+        catch (_) { timerSessions = []; }
+      }
       const remote = await fetchStudentLogs(studentId);
       const remoteIds = new Set(remote.map((log) => log.id));
       const remoteOccurrences = new Set(remote.filter((log) => log.sessionId).map((log) => `${log.sessionId}|${log.date}`));
@@ -777,6 +789,25 @@
     if (error) throw error;
     return (data || []).map(fromRemoteLog);
   }
+  async function fetchStudentTimerSessions(studentId) {
+    const { data, error } = await supabaseClient.from("study_timer_sessions").select("*")
+      .eq("student_id", studentId).eq("study_date", todayISO());
+    if (error) throw error;
+    return data || [];
+  }
+  function timerSessionElapsedSeconds(timer, now = Date.now()) {
+    let seconds = Math.max(0, Number(timer.focused_seconds) || 0);
+    if (timer.status === "running" && timer.last_started_at) {
+      const startedAt = Date.parse(timer.last_started_at);
+      const plannedEndAt = Date.parse(timer.planned_end_at);
+      if (Number.isFinite(startedAt)) seconds += Math.max(0, (Math.min(now, Number.isFinite(plannedEndAt) ? plannedEndAt : now) - startedAt) / 1000);
+    }
+    return Math.floor(seconds);
+  }
+  function formatTimestampTime(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
+  }
   async function loadStudentExtras(studentId) {
     let setupMissing = false;
     const { data: reviews, error: reviewsError } = await supabaseClient.from("study_log_reviews").select("*").eq("student_id", studentId).order("updated_at", { ascending: false });
@@ -838,6 +869,7 @@
     }
   }
   async function loadStudentAccountState() {
+    timerSessions = [];
     let saved = readCachedUserState(authUser.id);
     let importingFirstLocalUse = false;
     if (!saved && !localStorage.getItem(LOCAL_MIGRATION_KEY)) {
@@ -870,6 +902,7 @@
     const ids = (links || []).map((link) => link.student_id);
     if (!ids.length) {
       linkedStudents = []; selectedStudentId = null;
+      timerSessions = [];
       state = { ...defaultState, name: accountProfile.display_name || (isAdminAccount() ? "Admin" : "Parent"), schedule: [], logs: [], activeTimer: null };
       logReviews = []; timetableRequests = [];
       return;
@@ -882,10 +915,15 @@
   }
   async function loadSelectedStudent() {
     const student = linkedStudents.find((item) => item.id === selectedStudentId);
+    timerSessions = [];
     if (!student) return;
     state = { ...defaultState, name: student.display_name || "Student", schedule: Array.isArray(student.timetable) ? student.timetable : [], logs: [], activeTimer: null, weeklyGoalMinutes: Number(student.weekly_goal_minutes) || 300 };
-    try { state.logs = await fetchStudentLogs(student.id); setCloudStatus(`Viewing ${student.display_name}'s synced study logs.`); }
-    catch (error) { setCloudStatus("Could not load this student's cloud logs."); }
+    try { state.logs = await fetchStudentLogs(student.id); }
+    catch (_) { setCloudStatus("Could not load this student's cloud logs."); }
+    try {
+      timerSessions = await fetchStudentTimerSessions(student.id);
+      setCloudStatus(`Viewing ${student.display_name}'s synced study logs and live timer.`);
+    } catch (_) { setCloudStatus("Study logs loaded; could not load this student's live timer."); }
     await loadStudentExtras(student.id);
     renderTimetableRequests(); renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
   }
@@ -901,7 +939,7 @@
   }
   async function handleAuthSession(session) {
     if (!session) {
-      authUser = null; accountProfile = null; linkedStudents = []; selectedStudentId = null; logReviews = []; timetableRequests = []; state = loadState();
+      authUser = null; accountProfile = null; linkedStudents = []; selectedStudentId = null; timerSessions = []; logReviews = []; timetableRequests = []; state = loadState();
       renderCloudControls(); renderOverview(); if ($("historyView").classList.contains("active")) renderHistory();
       return;
     }
@@ -1076,6 +1114,6 @@
     }
     checkStudyReminders();
     if (authUser) void refreshStudyLogs();
-  }, 30000);
+  }, 15000);
   void initializeCloud().finally(ensureTimerLoop);
 })();
