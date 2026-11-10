@@ -607,7 +607,7 @@
     openLogDialog({ session, minutes: Math.max(0, Math.round(elapsedMs / 60000)), timer: true });
   }
   function finishTimerState() { state.activeTimer = null; clearInterval(timerInterval); timerInterval = null; }
-  function saveLog() {
+  async function saveLog() {
     if (isParentView()) { $("logError").textContent = "Parent accounts can view logs but cannot edit them."; return false; }
     const id = $("logSessionId").value; const session = state.schedule.find((item) => item.id === id);
     const timer = currentLogTimer && state.activeTimer?.sessionId === id ? state.activeTimer : null;
@@ -622,9 +622,17 @@
     const date = $("logDateInput").value; const priorIndex = state.logs.findIndex((log) => log.sessionId === id && id && log.date === date);
     const prior = priorIndex >= 0 ? state.logs[priorIndex] : null;
     const entry = { id: prior?.id || (id ? `session:${id}:${date}` : uid()), sessionId: id || null, date, subject: $("logSubject").value.trim(), topic: status === "missed" ? topic || "Session missed" : topic, topicAbout: status === "missed" ? "" : $("topicAboutInput").value.trim(), whatLearned: status === "missed" ? "" : $("learnedInput").value.trim(), topicProgress: status === "missed" ? "not_started" : $("topicProgressInput").value, notUnderstood: status === "missed" ? "" : $("notUnderstoodInput").value.trim(), minutes, notes: $("notesInput").value.trim(), status, plannedStart: session?.start || prior?.plannedStart || null, plannedEnd: session?.end || prior?.plannedEnd || null, createdAt: prior?.createdAt || new Date().toISOString() };
+    if (isStudentAccount()) {
+  const synced = await syncLog(entry);
+
+  if (!synced) {
+    $("logError").textContent =
+      "Your study session could not be saved to the cloud. Please check your connection and try again.";
+    return false;
+  }
+}
     if (priorIndex >= 0) state.logs[priorIndex] = entry; else state.logs.push(entry);
     saveState(); $("logDialog").close(); renderOverview(); renderHistory();
-    if (isStudentAccount()) void syncLog(entry);
     currentLogTimer = false; currentLogAutomatic = false; currentLogTimerSeconds = 0;
     showToast(prior ? "Study log updated" : "Study session saved"); return true;
   }
@@ -1006,15 +1014,20 @@ state.schedule = (timetablePresets[preset] || LEWI_TIMETABLE)
     }
   }
   async function syncLog(log) {
-    if (!isStudentAccount()) return;
-    setCloudStatus("Syncing study log…");
-    try {
-      await uploadStudentLogs([log]);
-      setCloudStatus("Study log synced to your account.");
-    } catch (error) {
-      setCloudStatus("Saved on this device; cloud sync will retry when you reconnect.");
-    }
+  if (!isStudentAccount()) return false;
+
+  setCloudStatus("Syncing study log…");
+
+  try {
+    await uploadStudentLogs([log]);
+    setCloudStatus("Study log synced to your account.");
+    return true;
+  } catch (error) {
+    console.error("Study log sync failed:", error);
+    setCloudStatus("Study log could not be synced. Please try again.");
+    return false;
   }
+}
   async function loadStudentAccountState() {
     timerSessions = [];
     appUsageRows = [];
@@ -1261,11 +1274,32 @@ state.schedule = (timetablePresets[preset] || LEWI_TIMETABLE)
     } else saveState();
     $("sessionDialog").close(); showToast(id ? "Timetable updated" : "Session added to timetable");
   });
-  $("logForm").addEventListener("submit", (event) => { if (event.submitter?.value === "cancel") return; event.preventDefault(); saveLog(); });
+  $("logForm").addEventListener("submit", async (event) => {
+  if (event.submitter?.value === "cancel") return;
+
+  event.preventDefault();
+
+  await saveLog();
+});
   $("statusInput").addEventListener("change", updateLogStatusFields);
   $("logSearch").addEventListener("input", renderHistory);
   $("editNameBtn").addEventListener("click", () => { $("nameInput").value = state.name === "Student" ? "" : state.name; $("nameDialog").showModal(); $("nameInput").focus(); });
-  $("nameForm").addEventListener("submit", (event) => { if (event.submitter?.value === "cancel") return; event.preventDefault(); state.name = $("nameInput").value.trim() || "Student"; saveState(); if (isStudentAccount()) void syncStudentDisplayName(); $("nameDialog").close(); renderOverview(); showToast("Profile name updated"); });
+  $("nameForm").addEventListener("submit", async (event) => {
+  if (event.submitter?.value === "cancel") return;
+
+  event.preventDefault();
+
+  state.name = $("nameInput").value.trim() || "Student";
+  saveState();
+
+  if (isStudentAccount()) {
+    await syncStudentDisplayName();
+  }
+
+  $("nameDialog").close();
+  renderOverview();
+  showToast("Profile name updated");
+});
   ["sessionDialog", "logDialog", "nameDialog"].forEach((id) => $(id).addEventListener("click", (event) => { if (event.target === $(id)) $(id).close(); }));
   document.addEventListener("click", (event) => { const go = event.target.closest("[data-go]"); if (go && go.closest(".page-view")) navigate(go.dataset.go); });
   renderOverview();
