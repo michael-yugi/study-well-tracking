@@ -5,138 +5,824 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f6f7f2" />
     <title>Studywell — study tracker</title>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
     <link rel="stylesheet" href="styles.css?v=7" />
   </head>
+
   <body>
     <div class="app-shell">
       <aside class="sidebar" aria-label="Main navigation">
         <a class="brand" href="#overview" aria-label="Studywell home">
-          <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 36 36"><path d="M18 4.5 31 11v14L18 31.5 5 25V11l13-6.5Z"/><path d="m12 18 4 4 8-9"/></svg></span>
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 36 36">
+              <path d="M18 4.5 31 11v14L18 31.5 5 25V11l13-6.5Z" />
+              <path d="m12 18 4 4 8-9" />
+            </svg>
+          </span>
           <span>studywell<span class="brand-period">.</span></span>
         </a>
 
         <div class="side-label">WORKSPACE</div>
+
         <nav class="nav-list">
-          <button class="nav-item active" data-view="overview"><span class="nav-icon">◫</span>Overview</button>
-          <button class="nav-item" data-view="timetable"><span class="nav-icon">▦</span>Timetable</button>
-          <button class="nav-item" data-view="history"><span class="nav-icon">◷</span>Study log</button>
+          <button class="nav-item active" data-view="overview">
+            <span class="nav-icon">◫</span>Overview
+          </button>
+          <button class="nav-item" data-view="timetable">
+            <span class="nav-icon">▦</span>Timetable
+          </button>
+          <button class="nav-item" data-view="history">
+            <span class="nav-icon">◷</span>Study log
+          </button>
         </nav>
 
         <div class="sidebar-bottom">
-          <div class="privacy-note"><span class="privacy-icon">⌂</span><div><strong>Your study, your data</strong><span>Saved on this device</span></div></div>
-          <div class="profile"><div class="avatar" id="avatarInitial">S</div><div class="profile-text"><strong id="profileName">Student</strong><span>Personal tracker</span></div><button class="icon-button profile-edit" id="editNameBtn" aria-label="Change your name" title="Change your name">···</button></div>
+          <div class="privacy-note">
+            <span class="privacy-icon">⌂</span>
+            <div>
+              <strong>Your study, your data</strong>
+              <span>Saved on this device</span>
+            </div>
+          </div>
+
+          <div class="profile">
+            <div class="avatar" id="avatarInitial">S</div>
+            <div class="profile-text">
+              <strong id="profileName">Student</strong>
+              <span>Personal tracker</span>
+            </div>
+            <button
+              class="icon-button profile-edit"
+              id="editNameBtn"
+              aria-label="Change your name"
+              title="Change your name"
+            >
+              ···
+            </button>
+          </div>
         </div>
       </aside>
 
       <main class="main-content">
-        <header class="topbar"><div class="breadcrumb"><span>My workspace</span><span class="crumb-slash">/</span><strong id="currentSection">Overview</strong></div><div class="topbar-right"><select id="studentPicker" class="student-picker" aria-label="Choose a student" hidden></select><span class="today-chip"><span class="live-dot"></span><span id="topDate"></span></span><button class="button button-quiet sync-account-button" id="syncAccountBtn">Sign in to sync</button></div></header>
+        <header class="topbar">
+          <div class="breadcrumb">
+            <span>My workspace</span>
+            <span class="crumb-slash">/</span>
+            <strong id="currentSection">Overview</strong>
+          </div>
 
+          <div class="topbar-right">
+            <select
+              id="studentPicker"
+              class="student-picker"
+              aria-label="Choose a student"
+              hidden
+            ></select>
+
+            <span class="today-chip">
+              <span class="live-dot"></span>
+              <span id="topDate"></span>
+            </span>
+
+            <button
+              class="button button-quiet sync-account-button"
+              id="syncAccountBtn"
+            >
+              Sign in to sync
+            </button>
+          </div>
+        </header>
+
+        <!-- OVERVIEW -->
         <section class="page-view active" id="overviewView">
-          <div class="page-heading"><div><p class="eyebrow" id="greeting">YOUR STUDY SPACE</p><h1>Make time for <span>what matters.</span></h1><p class="subheading" id="welcomeCopy">A clear view of your plan, your progress, and what you’ve learned.</p></div><button class="button button-dark" id="quickLogBtn"><span class="button-plus">+</span> Log study time</button></div>
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow" id="greeting">YOUR STUDY SPACE</p>
+              <h1>Make time for <span>what matters.</span></h1>
+              <p class="subheading" id="welcomeCopy">
+                A clear view of your plan, your progress, and what you’ve learned.
+              </p>
+            </div>
+
+            <button class="button button-dark" id="quickLogBtn">
+              <span class="button-plus">+</span> Log study time
+            </button>
+          </div>
 
           <div class="stat-grid">
-            <article class="stat-card stat-primary"><div class="stat-top"><span class="stat-label">STUDY TIME THIS WEEK</span><span class="stat-symbol">◷</span></div><div class="stat-value" id="weekTime">0<span>h</span> 0<span>m</span></div><div class="stat-foot"><span class="stat-marker"></span><span id="weekTimeCaption">Your tracked focus time</span></div><div class="stat-decoration" aria-hidden="true">✳</div></article>
-            <article class="stat-card"><div class="stat-top"><span class="stat-label">PLAN FOLLOWED</span><span class="stat-symbol green-symbol">↗</span></div><div class="stat-value" id="adherenceValue">—<span>%</span></div><div class="stat-foot"><span class="muted-foot" id="adherenceCaption">No sessions due yet</span></div><div class="mini-progress"><span id="adherenceBar"></span></div></article>
-            <article class="stat-card"><div class="stat-top"><span class="stat-label">SESSIONS COMPLETED</span><span class="stat-symbol purple-symbol">✓</span></div><div class="stat-value" id="completedValue">0</div><div class="stat-foot"><span class="muted-foot" id="completedCaption">This week</span></div><div class="week-dots" id="weekDots" aria-label="Study sessions by day"></div></article>
+            <article class="stat-card stat-primary">
+              <div class="stat-top">
+                <span class="stat-label">STUDY TIME THIS WEEK</span>
+                <span class="stat-symbol">◷</span>
+              </div>
+              <div class="stat-value" id="weekTime">
+                0<span>h</span> 0<span>m</span>
+              </div>
+              <div class="stat-foot">
+                <span class="stat-marker"></span>
+                <span id="weekTimeCaption">Your tracked focus time</span>
+              </div>
+              <div class="stat-decoration" aria-hidden="true">✳</div>
+            </article>
+
+            <article class="stat-card">
+              <div class="stat-top">
+                <span class="stat-label">PLAN FOLLOWED</span>
+                <span class="stat-symbol green-symbol">↗</span>
+              </div>
+              <div class="stat-value" id="adherenceValue">—<span>%</span></div>
+              <div class="stat-foot">
+                <span class="muted-foot" id="adherenceCaption">
+                  No sessions due yet
+                </span>
+              </div>
+              <div class="mini-progress">
+                <span id="adherenceBar"></span>
+              </div>
+            </article>
+
+            <article class="stat-card">
+              <div class="stat-top">
+                <span class="stat-label">SESSIONS COMPLETED</span>
+                <span class="stat-symbol purple-symbol">✓</span>
+              </div>
+              <div class="stat-value" id="completedValue">0</div>
+              <div class="stat-foot">
+                <span class="muted-foot" id="completedCaption">This week</span>
+              </div>
+              <div class="week-dots" id="weekDots" aria-label="Study sessions by day"></div>
+            </article>
           </div>
 
           <div class="content-grid">
             <section class="panel today-panel">
-              <div class="panel-heading"><div><p class="eyebrow">YOUR PLAN</p><h2>Today’s timetable</h2></div><button class="text-button" data-go="timetable">Edit timetable <span>↗</span></button></div>
-              <div class="today-date-row"><span id="todayLongDate"></span><span class="today-count" id="todayCount"></span></div>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">YOUR PLAN</p>
+                  <h2>Today’s timetable</h2>
+                </div>
+                <button class="text-button" data-go="timetable">
+                  Edit timetable <span>↗</span>
+                </button>
+              </div>
+
+              <div class="today-date-row">
+                <span id="todayLongDate"></span>
+                <span class="today-count" id="todayCount"></span>
+              </div>
+
               <div class="session-list" id="todaySessions"></div>
-              <div class="panel-footer"><span class="foot-dot"></span><span>Start a timer when you begin. Add a topic at the end so your learning is easy to look back on.</span></div>
+
+              <div class="panel-footer">
+                <span class="foot-dot"></span>
+                <span>
+                  Start a timer when you begin. Add a topic at the end so your
+                  learning is easy to look back on.
+                </span>
+              </div>
             </section>
 
             <section class="panel week-panel">
-              <div class="panel-heading"><div><p class="eyebrow">CONSISTENCY</p><h2>This week</h2></div><span class="week-range" id="weekRange"></span></div>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">CONSISTENCY</p>
+                  <h2>This week</h2>
+                </div>
+                <span class="week-range" id="weekRange"></span>
+              </div>
+
               <div class="week-chart" id="weekChart" aria-label="Study time by day"></div>
-              <div class="chart-legend"><span class="legend-key"></span>Tracked study time<span class="chart-total" id="chartTotal">0 min total</span></div>
-              <div class="week-insight" id="weekInsight"><span class="insight-icon">✳</span><span>Add your timetable to see how your week is shaping up.</span></div>
+
+              <div class="chart-legend">
+                <span class="legend-key"></span>
+                Tracked study time
+                <span class="chart-total" id="chartTotal">0 min total</span>
+              </div>
+
+              <div class="week-insight" id="weekInsight">
+                <span class="insight-icon">✳</span>
+                <span>Add your timetable to see how your week is shaping up.</span>
+              </div>
             </section>
           </div>
 
-          <section class="panel recent-panel"><div class="panel-heading"><div><p class="eyebrow">LOOKING BACK</p><h2>Recently studied</h2></div><button class="text-button" data-go="history">Full study log <span>↗</span></button></div><div id="recentLogs" class="recent-list"></div></section>
+          <section class="panel recent-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">LOOKING BACK</p>
+                <h2>Recently studied</h2>
+              </div>
+              <button class="text-button" data-go="history">
+                Full study log <span>↗</span>
+              </button>
+            </div>
+            <div id="recentLogs" class="recent-list"></div>
+          </section>
         </section>
 
+        <!-- TIMETABLE -->
         <section class="page-view" id="timetableView">
-          <div class="page-heading compact-heading"><div><p class="eyebrow">MAKE A PLAN THAT FITS</p><h1>Your <span>timetable.</span></h1><p class="subheading" id="timetableIntro">Set the sessions you want to make time for. You can change your plan whenever life changes.</p></div><button class="button button-dark" id="addSessionBtn"><span class="button-plus">+</span> Add session</button></div>
-          <div class="admin-timetable-tools" id="adminTimetableTools" hidden><label class="field-label" for="adminTimetablePreset">Set a timetable for the selected student</label><div><select class="field-input" id="adminTimetablePreset"><option value="" selected>Choose a starting timetable</option><option value="ann">Ann’s timetable</option><option value="lewi">Lewi’s timetable</option></select><button class="button button-quiet" id="applyTimetablePresetBtn">Apply timetable</button></div><p class="account-hint">Applying a preset replaces the selected student's current timetable. You can then edit individual sessions.</p></div>
-          <div class="schedule-note"><span class="note-icon">✳</span><span>Study time is counted from when the timer starts, pauses are excluded, and the timer stops at the lesson end. Studywell marks the result from the focused time; a lesson with no timer is marked missed after it ends.</span></div>
-          <section class="timetable-requests panel" id="timetableRequestsPanel" hidden><div class="panel-heading"><div><p class="eyebrow">PLAN TOGETHER</p><h2>Student requests</h2></div><button class="button button-quiet" id="requestTimetableChangeBtn">Request a timetable change</button></div><div id="timetableRequestList" class="request-list"></div></section>
+          <div class="page-heading compact-heading">
+            <div>
+              <p class="eyebrow">MAKE A PLAN THAT FITS</p>
+              <h1>Your <span>timetable.</span></h1>
+              <p class="subheading" id="timetableIntro">
+                Set the sessions you want to make time for. You can change your
+                plan whenever life changes.
+              </p>
+            </div>
+
+            <button class="button button-dark" id="addSessionBtn">
+              <span class="button-plus">+</span> Add session
+            </button>
+          </div>
+
+          <!-- ADMIN TIMETABLE PRESETS -->
+          <div class="admin-timetable-tools" id="adminTimetableTools" hidden>
+            <label class="field-label" for="adminTimetablePreset">
+              Set a timetable for the selected student
+            </label>
+
+            <div>
+              <select class="field-input" id="adminTimetablePreset">
+                <option value="" selected>Choose a starting timetable</option>
+                <option value="ann">Ann’s timetable (Grade 7)</option>
+                <option value="lewi">Lewi’s timetable (Grade 8)</option>
+                <option value="lenny">Lenny’s timetable (Grade 10)</option>
+              </select>
+
+              <button
+                class="button button-quiet"
+                id="applyTimetablePresetBtn"
+              >
+                Apply timetable
+              </button>
+            </div>
+
+            <p class="account-hint">
+              Applying a preset replaces the selected student's current
+              timetable. You can then edit individual sessions.
+            </p>
+          </div>
+
+          <div class="schedule-note">
+            <span class="note-icon">✳</span>
+            <span>
+              Study time is counted from when the timer starts, pauses are
+              excluded, and the timer stops at the lesson end. Studywell marks
+              the result from the focused time; a lesson with no timer is
+              marked missed after it ends.
+            </span>
+          </div>
+
+          <section class="timetable-requests panel" id="timetableRequestsPanel" hidden>
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">PLAN TOGETHER</p>
+                <h2>Student requests</h2>
+              </div>
+              <button class="button button-quiet" id="requestTimetableChangeBtn">
+                Request a timetable change
+              </button>
+            </div>
+            <div id="timetableRequestList" class="request-list"></div>
+          </section>
+
           <div id="scheduleList" class="schedule-days"></div>
         </section>
 
+        <!-- STUDY HISTORY -->
         <section class="page-view" id="historyView">
-          <div class="page-heading compact-heading"><div><p class="eyebrow">YOUR LEARNING, IN YOUR WORDS</p><h1>Study <span>log.</span></h1><p class="subheading">See what you studied, how long you focused, and how it matched your plan.</p></div><button class="button button-dark" id="historyLogBtn"><span class="button-plus">+</span> Log study time</button></div>
-          <section class="weekly-summary panel" id="weeklySummary"><div class="weekly-summary-heading"><div><p class="eyebrow">WEEKLY OVERVIEW</p><h2 id="weeklySummaryTitle">This week's study summary</h2></div><div class="report-actions"><select class="field-input report-range" id="reportRange" aria-label="Report time period"><option value="week">This week</option><option value="month">Last 30 days</option></select><button class="button button-quiet" id="printReportBtn">Print report</button></div></div><div class="summary-stats" id="weeklySummaryStats"></div><div class="weekly-goal"><div class="weekly-goal-head"><strong>Weekly study goal</strong><strong id="weeklyGoalValue">0 min of 5h</strong></div><div class="mini-progress"><span id="weeklyGoalBar"></span></div><p id="weeklyGoalNote">0% of this week's goal</p><div class="weekly-goal-controls" id="weeklyGoalControls" hidden><label class="field-label" for="weeklyGoalInput">Set target in hours</label><input class="field-input weekly-goal-input" id="weeklyGoalInput" type="number" min="0.5" max="50" step="0.5"/><button class="button button-quiet" id="saveWeeklyGoalBtn">Save weekly goal</button></div></div><p class="weekly-summary-note" id="weeklySummaryNote"></p></section>
-          <div class="history-toolbar"><div class="history-count" id="historyCount">0 study sessions</div><label class="search-box"><span>⌕</span><input id="logSearch" type="search" placeholder="Search subjects or topics" aria-label="Search study log" /></label></div>
+          <div class="page-heading compact-heading">
+            <div>
+              <p class="eyebrow">YOUR LEARNING, IN YOUR WORDS</p>
+              <h1>Study <span>log.</span></h1>
+              <p class="subheading">
+                See what you studied, how long you focused, and how it matched
+                your plan.
+              </p>
+            </div>
+
+            <button class="button button-dark" id="historyLogBtn">
+              <span class="button-plus">+</span> Log study time
+            </button>
+          </div>
+
+          <section class="weekly-summary panel" id="weeklySummary">
+            <div class="weekly-summary-heading">
+              <div>
+                <p class="eyebrow">WEEKLY OVERVIEW</p>
+                <h2 id="weeklySummaryTitle">This week's study summary</h2>
+              </div>
+
+              <div class="report-actions">
+                <select class="field-input report-range" id="reportRange" aria-label="Report time period">
+                  <option value="week">This week</option>
+                  <option value="month">Last 30 days</option>
+                </select>
+                <button class="button button-quiet" id="printReportBtn">
+                  Print report
+                </button>
+              </div>
+            </div>
+
+            <div class="summary-stats" id="weeklySummaryStats"></div>
+
+            <div class="weekly-goal">
+              <div class="weekly-goal-head">
+                <strong>Weekly study goal</strong>
+                <strong id="weeklyGoalValue">0 min of 5h</strong>
+              </div>
+
+              <div class="mini-progress">
+                <span id="weeklyGoalBar"></span>
+              </div>
+
+              <p id="weeklyGoalNote">0% of this week's goal</p>
+
+              <div class="weekly-goal-controls" id="weeklyGoalControls" hidden>
+                <label class="field-label" for="weeklyGoalInput">
+                  Set target in hours
+                </label>
+                <input
+                  class="field-input weekly-goal-input"
+                  id="weeklyGoalInput"
+                  type="number"
+                  min="0.5"
+                  max="50"
+                  step="0.5"
+                />
+                <button class="button button-quiet" id="saveWeeklyGoalBtn">
+                  Save weekly goal
+                </button>
+              </div>
+            </div>
+
+            <p class="weekly-summary-note" id="weeklySummaryNote"></p>
+          </section>
+
+          <div class="history-toolbar">
+            <div class="history-count" id="historyCount">0 study sessions</div>
+
+            <label class="search-box">
+              <span>⌕</span>
+              <input
+                id="logSearch"
+                type="search"
+                placeholder="Search subjects or topics"
+                aria-label="Search study log"
+              />
+            </label>
+          </div>
+
           <div id="historyList" class="history-list"></div>
         </section>
-        <footer class="app-footer"><span>Small, steady sessions add up.</span><span>Keep showing up <span class="footer-heart">♥</span></span><span class="footer-credit">Created by <strong>Michael Yugi</strong></span></footer>
+
+        <footer class="app-footer">
+          <span>Small, steady sessions add up.</span>
+          <span>Keep showing up <span class="footer-heart">♥</span></span>
+          <span class="footer-credit">Created by <strong>Michael Yugi</strong></span>
+        </footer>
       </main>
     </div>
 
+    <!-- ADD / EDIT TIMETABLE SESSION -->
     <dialog class="modal" id="sessionDialog">
       <form method="dialog" id="sessionForm">
-        <div class="modal-top"><div><p class="eyebrow" id="modalEyebrow">ADD TO YOUR TIMETABLE</p><h2 id="modalTitle">Plan a study session</h2></div><button type="button" class="icon-button close-modal" data-close-dialog="sessionDialog" aria-label="Close">×</button></div>
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow" id="modalEyebrow">ADD TO YOUR TIMETABLE</p>
+            <h2 id="modalTitle">Plan a study session</h2>
+          </div>
+          <button
+            type="button"
+            class="icon-button close-modal"
+            data-close-dialog="sessionDialog"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
         <input type="hidden" id="sessionId" />
-        <label class="field-label" for="subjectInput">Subject</label><input class="field-input" id="subjectInput" required maxlength="48" placeholder="e.g. Biology" />
-        <label class="field-label" for="focusInput">What will you focus on? <span>optional</span></label><input class="field-input" id="focusInput" maxlength="80" placeholder="e.g. Cell structure, chapter 3" />
-        <div class="field-row"><div class="field-grow"><label class="field-label" for="dayInput">Day</label><select class="field-input" id="dayInput"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></div><div class="field-grow"><label class="field-label" for="startInput">Start</label><input class="field-input" id="startInput" type="time" value="16:00" required /></div><div class="field-grow"><label class="field-label" for="endInput">End</label><input class="field-input" id="endInput" type="time" value="17:00" required /></div></div>
+
+        <label class="field-label" for="subjectInput">Subject</label>
+        <input class="field-input" id="subjectInput" required maxlength="48" placeholder="e.g. Biology" />
+
+        <label class="field-label" for="focusInput">
+          What will you focus on? <span>optional</span>
+        </label>
+        <input class="field-input" id="focusInput" maxlength="80" placeholder="e.g. Cell structure, chapter 3" />
+
+        <div class="field-row">
+          <div class="field-grow">
+            <label class="field-label" for="dayInput">Day</label>
+            <select class="field-input" id="dayInput">
+              <option value="1">Monday</option>
+              <option value="2">Tuesday</option>
+              <option value="3">Wednesday</option>
+              <option value="4">Thursday</option>
+              <option value="5">Friday</option>
+              <option value="6">Saturday</option>
+              <option value="0">Sunday</option>
+            </select>
+          </div>
+
+          <div class="field-grow">
+            <label class="field-label" for="startInput">Start</label>
+            <input class="field-input" id="startInput" type="time" value="16:00" required />
+          </div>
+
+          <div class="field-grow">
+            <label class="field-label" for="endInput">End</label>
+            <input class="field-input" id="endInput" type="time" value="17:00" required />
+          </div>
+        </div>
+
         <p class="form-error" id="sessionError" role="alert"></p>
-        <div class="modal-actions"><button class="button button-quiet" value="cancel" formnovalidate>Cancel</button><button class="button button-dark" id="saveSessionBtn" value="save">Save session</button></div>
+
+        <div class="modal-actions">
+          <button class="button button-quiet" value="cancel" formnovalidate>
+            Cancel
+          </button>
+          <button class="button button-dark" id="saveSessionBtn" value="save">
+            Save session
+          </button>
+        </div>
       </form>
     </dialog>
 
+    <!-- STUDY LOG -->
     <dialog class="modal" id="logDialog">
       <form method="dialog" id="logForm">
-        <div class="modal-top"><div><p class="eyebrow" id="logEyebrow">MAKE A NOTE OF IT</p><h2 id="logTitle">Log study time</h2></div><button type="button" class="icon-button close-modal" data-close-dialog="logDialog" aria-label="Close">×</button></div>
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow" id="logEyebrow">MAKE A NOTE OF IT</p>
+            <h2 id="logTitle">Log study time</h2>
+          </div>
+          <button
+            type="button"
+            class="icon-button close-modal"
+            data-close-dialog="logDialog"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
         <input type="hidden" id="logSessionId" />
-        <div class="timer-banner" id="timerBanner" hidden><span class="timer-live"></span><span id="timerText">00:00</span><span class="timer-copy" id="timerCopy">Focus timer running</span></div>
-        <label class="field-label" for="logSubject">Subject</label><input class="field-input" id="logSubject" required maxlength="48" placeholder="e.g. History" />
-        <label class="field-label" for="topicInput">What did you study? <span>helps you remember later</span></label><input class="field-input" id="topicInput" required maxlength="120" placeholder="e.g. Causes of the French Revolution" />
-        <label class="field-label" for="topicAboutInput">What is this topic about? <span>optional</span></label><textarea class="field-input field-textarea" id="topicAboutInput" maxlength="500" placeholder="Describe the main idea or what this topic covers…"></textarea>
-        <label class="field-label" for="learnedInput">What did you learn? <span>optional</span></label><textarea class="field-input field-textarea" id="learnedInput" maxlength="500" placeholder="Write the key facts, methods, or ideas you learned…"></textarea>
-        <label class="field-label" for="topicProgressInput">Progress on this topic</label><select class="field-input" id="topicProgressInput"><option value="in_progress">In progress</option><option value="completed">Topic completed</option><option value="needs_help">Need more help</option><option value="not_started">Not started</option></select>
-        <label class="field-label" for="notUnderstoodInput">What didn’t you understand properly? <span>optional</span></label><textarea class="field-input field-textarea" id="notUnderstoodInput" maxlength="500" placeholder="Note questions or parts to ask about or review…"></textarea>
-        <div class="field-row"><div class="field-grow"><label class="field-label" for="minutesInput">Minutes studied</label><input class="field-input" id="minutesInput" type="number" min="0" max="1440" step="1" required placeholder="45" /></div><div class="field-grow"><label class="field-label" for="logDateInput">Study date</label><input class="field-input" id="logDateInput" type="date" required /></div></div>
-        <label class="field-label" for="notesInput">Next step or other notes <span>optional</span></label><textarea class="field-input field-textarea" id="notesInput" maxlength="240" placeholder="A reminder, question, or next action…"></textarea>
-        <div class="log-meta-row"><span id="plannedForLabel"></span><label class="status-select-label">Session result <select id="statusInput" class="status-select"><option value="completed">Completed</option><option value="partial">Partly completed</option><option value="missed">Missed / no study</option></select></label></div>
+
+        <div class="timer-banner" id="timerBanner" hidden>
+          <span class="timer-live"></span>
+          <span id="timerText">00:00</span>
+          <span class="timer-copy" id="timerCopy">Focus timer running</span>
+        </div>
+
+        <label class="field-label" for="logSubject">Subject</label>
+        <input class="field-input" id="logSubject" required maxlength="48" placeholder="e.g. History" />
+
+        <label class="field-label" for="topicInput">
+          What did you study? <span>helps you remember later</span>
+        </label>
+        <input class="field-input" id="topicInput" required maxlength="120" placeholder="e.g. Causes of the French Revolution" />
+
+        <label class="field-label" for="topicAboutInput">
+          What is this topic about? <span>optional</span>
+        </label>
+        <textarea class="field-input field-textarea" id="topicAboutInput" maxlength="500" placeholder="Describe the main idea or what this topic covers…"></textarea>
+
+        <label class="field-label" for="learnedInput">
+          What did you learn? <span>optional</span>
+        </label>
+        <textarea class="field-input field-textarea" id="learnedInput" maxlength="500" placeholder="Write the key facts, methods, or ideas you learned…"></textarea>
+
+        <label class="field-label" for="topicProgressInput">
+          Progress on this topic
+        </label>
+        <select class="field-input" id="topicProgressInput">
+          <option value="in_progress">In progress</option>
+          <option value="completed">Topic completed</option>
+          <option value="needs_help">Need more help</option>
+          <option value="not_started">Not started</option>
+        </select>
+
+        <label class="field-label" for="notUnderstoodInput">
+          What didn’t you understand properly? <span>optional</span>
+        </label>
+        <textarea class="field-input field-textarea" id="notUnderstoodInput" maxlength="500" placeholder="Note questions or parts to ask about or review…"></textarea>
+
+        <div class="field-row">
+          <div class="field-grow">
+            <label class="field-label" for="minutesInput">Minutes studied</label>
+            <input class="field-input" id="minutesInput" type="number" min="0" max="1440" step="1" required placeholder="45" />
+          </div>
+
+          <div class="field-grow">
+            <label class="field-label" for="logDateInput">Study date</label>
+            <input class="field-input" id="logDateInput" type="date" required />
+          </div>
+        </div>
+
+        <label class="field-label" for="notesInput">
+          Next step or other notes <span>optional</span>
+        </label>
+        <textarea class="field-input field-textarea" id="notesInput" maxlength="240" placeholder="A reminder, question, or next action…"></textarea>
+
+        <div class="log-meta-row">
+          <span id="plannedForLabel"></span>
+          <label class="status-select-label">
+            Session result
+            <select id="statusInput" class="status-select">
+              <option value="completed">Completed</option>
+              <option value="partial">Partly completed</option>
+              <option value="missed">Missed / no study</option>
+            </select>
+          </label>
+        </div>
+
         <p class="form-error" id="logError" role="alert"></p>
-        <div class="modal-actions"><button class="button button-quiet" value="cancel" formnovalidate>Cancel</button><button class="button button-dark" id="saveLogBtn" value="save">Save study log</button></div>
+
+        <div class="modal-actions">
+          <button class="button button-quiet" value="cancel" formnovalidate>
+            Cancel
+          </button>
+          <button class="button button-dark" id="saveLogBtn" value="save">
+            Save study log
+          </button>
+        </div>
       </form>
     </dialog>
 
+    <!-- ACCOUNT -->
     <dialog class="modal" id="accountDialog">
-      <div class="modal-top"><div><p class="eyebrow">CLOUD SYNC</p><h2 id="accountDialogTitle">Sync your study data</h2></div><button class="icon-button close-modal" data-close-account aria-label="Close">×</button></div>
+      <div class="modal-top">
+        <div>
+          <p class="eyebrow">CLOUD SYNC</p>
+          <h2 id="accountDialogTitle">Sync your study data</h2>
+        </div>
+        <button class="icon-button close-modal" data-close-account aria-label="Close">
+          ×
+        </button>
+      </div>
+
       <section id="authPanel">
-        <div class="auth-mode-row"><button class="auth-mode active" data-mode="signin">Sign in</button><button class="auth-mode" data-mode="signup">Create account</button></div>
-        <div id="signupFields" hidden><label class="field-label" for="accountName">Your name</label><input class="field-input" id="accountName" maxlength="48" placeholder="e.g. Ann" /><label class="field-label" for="accountType">Account type</label><select class="field-input" id="accountType"><option value="student">Student</option><option value="parent">Parent</option></select><p class="account-hint">Students use their account to record lessons. Parents can view linked students’ timetables and study logs. The admin account manages timetables and can view every linked student.</p></div>
-        <label class="field-label" for="accountEmail">Email</label><input class="field-input" id="accountEmail" type="email" autocomplete="username" required placeholder="you@example.com" />
-        <label class="field-label" for="accountPassword">Password</label><input class="field-input" id="accountPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="At least 8 characters" />
-        <p class="form-error" id="accountError" role="alert"></p><p class="account-hint" id="cloudMessage">Study logs will sync across your signed-in devices.</p>
-        <div class="modal-actions"><button class="button button-dark" id="accountSubmit">Sign in</button></div>
+        <div class="auth-mode-row">
+          <button class="auth-mode active" data-mode="signin">Sign in</button>
+          <button class="auth-mode" data-mode="signup">Create account</button>
+        </div>
+
+        <div id="signupFields" hidden>
+          <label class="field-label" for="accountName">Your name</label>
+          <input class="field-input" id="accountName" maxlength="48" placeholder="e.g. Ann" />
+
+          <label class="field-label" for="accountType">Account type</label>
+          <select class="field-input" id="accountType">
+            <option value="student">Student</option>
+            <option value="parent">Parent</option>
+          </select>
+
+          <p class="account-hint">
+            Students use their account to record lessons. Parents can view
+            linked students’ timetables and study logs. The admin account
+            manages timetables and can view every linked student.
+          </p>
+        </div>
+
+        <label class="field-label" for="accountEmail">Email</label>
+        <input class="field-input" id="accountEmail" type="email" autocomplete="username" required placeholder="you@example.com" />
+
+        <label class="field-label" for="accountPassword">Password</label>
+        <input class="field-input" id="accountPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="At least 8 characters" />
+
+        <p class="form-error" id="accountError" role="alert"></p>
+        <p class="account-hint" id="cloudMessage">
+          Study logs will sync across your signed-in devices.
+        </p>
+
+        <div class="modal-actions">
+          <button class="button button-dark" id="accountSubmit">
+            Sign in
+          </button>
+        </div>
       </section>
+
       <section id="linkPanel" hidden>
         <p class="account-hint" id="signedInSummary"></p>
-        <div id="adminTools" hidden><p class="account-hint">The admin can view every linked student and manage timetables. A Parent account creates each student link code; choose a linked student from the menu at the top of the page.</p><button class="button button-quiet refresh-students-button" id="refreshAdminStudentsBtn">Refresh student list</button></div>
-        <div id="parentTools" hidden><p class="account-hint" id="parentToolsIntro">Create a separate one-time code for each student. Each linked student keeps an independent timetable and study log.</p><button class="button button-dark" id="createInviteBtn">Create student link code</button><button class="button button-quiet refresh-students-button" id="refreshStudentsBtn">Refresh student list</button><div class="invite-code-box" id="inviteCodeBox" hidden><span>Share this one-time code with the student:</span><strong id="inviteCodeText"></strong><button class="button button-quiet" id="copyInviteBtn">Copy code</button></div><div class="linked-students" id="linkedStudentsList"></div></div>
-        <div id="studentTools" hidden><label class="field-label" for="parentCodeInput">Parent / guardian link code</label><input class="field-input" id="parentCodeInput" maxlength="32" autocomplete="off" placeholder="Paste a code from a parent or guardian" /><button class="button button-dark redeem-button" id="redeemInviteBtn">Link parent / guardian</button><p class="account-hint">Each parent or guardian creates their own one-time code. You can link several caregivers; each can sign in with their own account to view your logs.</p><button class="button button-quiet" id="reminderToggleBtn">Enable study reminders</button><p class="account-hint" id="reminderStatus">Reminders appear while Studywell is open.</p><p class="account-hint" id="phoneUsageStatus">Phone app-use reports require the Studywell Android app on the student's Samsung phone.</p><button class="button button-quiet" id="phoneUsageButton" hidden>Enable app-use reporting</button></div>
-        <p class="form-error" id="linkError" role="alert"></p><div class="modal-actions"><button class="button button-quiet" id="signOutBtn">Sign out</button></div>
+
+        <div id="adminTools" hidden>
+          <p class="account-hint">
+            The admin can view every linked student and manage timetables.
+            A Parent account creates each student link code; choose a linked
+            student from the menu at the top of the page.
+          </p>
+          <button class="button button-quiet refresh-students-button" id="refreshAdminStudentsBtn">
+            Refresh student list
+          </button>
+        </div>
+
+        <div id="parentTools" hidden>
+          <p class="account-hint" id="parentToolsIntro">
+            Create a separate one-time code for each student. Each linked
+            student keeps an independent timetable and study log.
+          </p>
+
+          <button class="button button-dark" id="createInviteBtn">
+            Create student link code
+          </button>
+          <button class="button button-quiet refresh-students-button" id="refreshStudentsBtn">
+            Refresh student list
+          </button>
+
+          <div class="invite-code-box" id="inviteCodeBox" hidden>
+            <span>Share this one-time code with the student:</span>
+            <strong id="inviteCodeText"></strong>
+            <button class="button button-quiet" id="copyInviteBtn">
+              Copy code
+            </button>
+          </div>
+
+          <div class="linked-students" id="linkedStudentsList"></div>
+        </div>
+
+        <div id="studentTools" hidden>
+          <label class="field-label" for="parentCodeInput">
+            Parent / guardian link code
+          </label>
+          <input class="field-input" id="parentCodeInput" maxlength="32" autocomplete="off" placeholder="Paste a code from a parent or guardian" />
+
+          <button class="button button-dark redeem-button" id="redeemInviteBtn">
+            Link parent / guardian
+          </button>
+
+          <p class="account-hint">
+            Each parent or guardian creates their own one-time code. You can
+            link several caregivers; each can sign in with their own account
+            to view your logs.
+          </p>
+
+          <button class="button button-quiet" id="reminderToggleBtn">
+            Enable study reminders
+          </button>
+          <p class="account-hint" id="reminderStatus">
+            Reminders appear while Studywell is open.
+          </p>
+
+          <p class="account-hint" id="phoneUsageStatus">
+            Phone app-use reports require the Studywell Android app on the
+            student's Samsung phone.
+          </p>
+          <button class="button button-quiet" id="phoneUsageButton" hidden>
+            Enable app-use reporting
+          </button>
+        </div>
+
+        <p class="form-error" id="linkError" role="alert"></p>
+
+        <div class="modal-actions">
+          <button class="button button-quiet" id="signOutBtn">
+            Sign out
+          </button>
+        </div>
       </section>
     </dialog>
 
-    <dialog class="modal small-modal" id="reviewDialog"><form id="reviewForm"><div class="modal-top"><div><p class="eyebrow">PARENT REVIEW</p><h2>Review study log</h2></div><button type="button" class="icon-button close-modal" data-close-dialog="reviewDialog" aria-label="Close">×</button></div><input type="hidden" id="reviewLogId" /><p class="account-hint" id="reviewLogSummary"></p><label class="field-label" for="reviewCommentInput">Comment for the student <span>optional</span></label><textarea class="field-input field-textarea" id="reviewCommentInput" maxlength="500" placeholder="Encourage them or suggest what to practise next…"></textarea><p class="form-error" id="reviewError" role="alert"></p><div class="modal-actions"><button class="button button-quiet" type="button" data-close-dialog="reviewDialog">Cancel</button><button class="button button-dark" id="saveReviewBtn">Mark reviewed</button></div></form></dialog>
+    <!-- PARENT REVIEW -->
+    <dialog class="modal small-modal" id="reviewDialog">
+      <form id="reviewForm">
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow">PARENT REVIEW</p>
+            <h2>Review study log</h2>
+          </div>
+          <button
+            type="button"
+            class="icon-button close-modal"
+            data-close-dialog="reviewDialog"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
 
-    <dialog class="modal small-modal" id="timetableRequestDialog"><form id="timetableRequestForm"><div class="modal-top"><div><p class="eyebrow">ASK THE ADMIN</p><h2 id="timetableRequestDialogTitle">Request a timetable change</h2></div><button type="button" class="icon-button close-modal" data-close-dialog="timetableRequestDialog" aria-label="Close">×</button></div><div id="makeupFields" hidden><label class="field-label" for="makeupDateInput">Suggested make-up date</label><input class="field-input" id="makeupDateInput" type="date"/><div class="field-row"><div class="field-grow"><label class="field-label" for="makeupStartInput">Start</label><input class="field-input" id="makeupStartInput" type="time"/></div><div class="field-grow"><label class="field-label" for="makeupEndInput">End</label><input class="field-input" id="makeupEndInput" type="time"/></div></div></div><label class="field-label" id="timetableRequestReasonLabel" for="timetableRequestInput">What change would help?</label><textarea class="field-input field-textarea" id="timetableRequestInput" maxlength="800" required placeholder="For example, move Maths revision to Saturday afternoon because of football practice."></textarea><p class="form-error" id="timetableRequestError" role="alert"></p><div class="modal-actions"><button class="button button-quiet" type="button" data-close-dialog="timetableRequestDialog">Cancel</button><button class="button button-dark" id="submitTimetableRequestBtn">Send request</button></div></form></dialog>
+        <input type="hidden" id="reviewLogId" />
+        <p class="account-hint" id="reviewLogSummary"></p>
 
-    <dialog class="modal small-modal" id="nameDialog"><form method="dialog" id="nameForm"><div class="modal-top"><div><p class="eyebrow">MAKE IT YOURS</p><h2>What should we call you?</h2></div><button type="button" class="icon-button close-modal" data-close-dialog="nameDialog" aria-label="Close">×</button></div><label class="field-label" for="nameInput">Your name</label><input class="field-input" id="nameInput" maxlength="32" placeholder="Your name" /><div class="modal-actions"><button class="button button-quiet" value="cancel" formnovalidate>Cancel</button><button class="button button-dark" id="saveNameBtn" value="save">Save name</button></div></form></dialog>
+        <label class="field-label" for="reviewCommentInput">
+          Comment for the student <span>optional</span>
+        </label>
+        <textarea class="field-input field-textarea" id="reviewCommentInput" maxlength="500" placeholder="Encourage them or suggest what to practise next…"></textarea>
+
+        <p class="form-error" id="reviewError" role="alert"></p>
+
+        <div class="modal-actions">
+          <button class="button button-quiet" type="button" data-close-dialog="reviewDialog">
+            Cancel
+          </button>
+          <button class="button button-dark" id="saveReviewBtn">
+            Mark reviewed
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- TIMETABLE REQUEST -->
+    <dialog class="modal small-modal" id="timetableRequestDialog">
+      <form id="timetableRequestForm">
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow">ASK THE ADMIN</p>
+            <h2 id="timetableRequestDialogTitle">
+              Request a timetable change
+            </h2>
+          </div>
+          <button
+            type="button"
+            class="icon-button close-modal"
+            data-close-dialog="timetableRequestDialog"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <div id="makeupFields" hidden>
+          <label class="field-label" for="makeupDateInput">
+            Suggested make-up date
+          </label>
+          <input class="field-input" id="makeupDateInput" type="date" />
+
+          <div class="field-row">
+            <div class="field-grow">
+              <label class="field-label" for="makeupStartInput">Start</label>
+              <input class="field-input" id="makeupStartInput" type="time" />
+            </div>
+
+            <div class="field-grow">
+              <label class="field-label" for="makeupEndInput">End</label>
+              <input class="field-input" id="makeupEndInput" type="time" />
+            </div>
+          </div>
+        </div>
+
+        <label class="field-label" id="timetableRequestReasonLabel" for="timetableRequestInput">
+          What change would help?
+        </label>
+        <textarea class="field-input field-textarea" id="timetableRequestInput" maxlength="800" required placeholder="For example, move Maths revision to Saturday afternoon because of football practice."></textarea>
+
+        <p class="form-error" id="timetableRequestError" role="alert"></p>
+
+        <div class="modal-actions">
+          <button class="button button-quiet" type="button" data-close-dialog="timetableRequestDialog">
+            Cancel
+          </button>
+          <button class="button button-dark" id="submitTimetableRequestBtn">
+            Send request
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- CHANGE NAME -->
+    <dialog class="modal small-modal" id="nameDialog">
+      <form method="dialog" id="nameForm">
+        <div class="modal-top">
+          <div>
+            <p class="eyebrow">MAKE IT YOURS</p>
+            <h2>What should we call you?</h2>
+          </div>
+          <button
+            type="button"
+            class="icon-button close-modal"
+            data-close-dialog="nameDialog"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <label class="field-label" for="nameInput">Your name</label>
+        <input class="field-input" id="nameInput" maxlength="32" placeholder="Your name" />
+
+        <div class="modal-actions">
+          <button class="button button-quiet" value="cancel" formnovalidate>
+            Cancel
+          </button>
+          <button class="button button-dark" id="saveNameBtn" value="save">
+            Save name
+          </button>
+        </div>
+      </form>
+    </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="supabase-config.js?v=2"></script>
     <script src="app.js?v=12"></script>
