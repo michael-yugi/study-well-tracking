@@ -1076,7 +1076,7 @@ state.schedule = (timetablePresets[preset] || LEWI_TIMETABLE)
       logReviews = []; timetableRequests = [];
       return;
     }
-     const { data: profiles, error: profileError } = await supabaseClient.from("study_profiles").select("id,display_name,timetable,weekly_goal_minutes,time_zone").in("id", ids);
+     const { data: profiles, error: profileError } = await supabaseClient.from("study_profiles").select("id,display_name,grade,timetable,weekly_goal_minutes,time_zone").in("id", ids);
     if (profileError) throw profileError;
     linkedStudents = (profiles || []).sort((a, b) => (a.display_name || "").localeCompare(b.display_name || ""));
     if (!linkedStudents.some((student) => student.id === selectedStudentId)) selectedStudentId = linkedStudents[0]?.id || null;
