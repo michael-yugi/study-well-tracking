@@ -28,6 +28,44 @@
     { start: "12:30", end: "13:00", label: "Lesson 3", subjects: ["Social Studies", "Creative Arts", "Science", "English", "Pre-Technical"] },
     { start: "14:30", end: "15:00", label: "Lesson 4", subjects: ["Agriculture", "Pre-Technical", "CRE", "Maths", "Maths"] },
   ];
+ const LENNY_WEEKDAY_ROWS = [
+  {
+    start: "08:40",
+    end: "09:40",
+    label: "Lesson 1",
+    subjects: [
+      "Business Studies",
+      "Community Service Learning",
+      "English",
+      "Kiswahili",
+      "Business Studies"
+    ]
+  },
+  {
+    start: "10:10",
+    end: "11:00",
+    label: "Lesson 2",
+    subjects: [
+      "Mathematics",
+      "English",
+      "Business Studies",
+      "Biology",
+      "Chemistry"
+    ]
+  },
+  {
+    start: "11:30",
+    end: "12:00",
+    label: "Lesson 3",
+    subjects: [
+      "English",
+      "Biology",
+      "Chemistry",
+      "English",
+      "Community Service Learning"
+    ]
+  }
+]; 
   function buildTimetable(rows, prefix) {
     return rows.flatMap((row, rowIndex) => row.subjects.map((subject, index) => ({
       id: `${prefix}-${index + 1}-${rowIndex}`,
@@ -47,6 +85,7 @@
   }
   const LEWI_TIMETABLE = buildTimetable(WEEKDAY_ROWS, "lewi");
   const ANN_TIMETABLE = buildTimetable(ANN_WEEKDAY_ROWS, "ann");
+  const LENNY_TIMETABLE = buildTimetable(LENNY_WEEKDAY_ROWS, "lenny");
   const defaultState = { name: "Student", schedule: LEWI_TIMETABLE, logs: [], activeTimer: null, weeklyGoalMinutes: 300, timetableImported: true };
   let authUser = null;
   let accountProfile = null;
@@ -947,7 +986,14 @@
     if (!preset) { setCloudStatus("Choose a starting timetable first."); return; }
     if (state.schedule.length && !window.confirm("Replace this student's current timetable with the selected timetable?")) return;
     const previousSchedule = state.schedule;
-    state.schedule = (preset === "ann" ? ANN_TIMETABLE : LEWI_TIMETABLE).map((session) => ({ ...session }));
+    const timetablePresets = {
+  ann: ANN_TIMETABLE,
+  lewi: LEWI_TIMETABLE,
+  lenny: LENNY_TIMETABLE
+};
+
+state.schedule = (timetablePresets[preset] || LEWI_TIMETABLE)
+  .map((session) => ({ ...session }));
     renderTimetable(); renderOverview();
     try {
       await syncSelectedStudentTimetable();
